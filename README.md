@@ -1,35 +1,50 @@
 # PulseTrade — NIFTY Intraday Price Action Bot
 
-Simple, clean intraday trading application for NIFTY.
+Simple, clean intraday NIFTY options trading application with **GPT-6 Astra as the final trade-decision engine**.
+
+## Decision architecture
+
+`NIFTY SPOT 15M → price-action/structure context → OPTION 5M setup → OPTION 1M trigger → GPT-6 Astra FINAL DECISION → hard risk guard → paper order`
+
+The deterministic strategy computes evidence. **GPT-6 Astra (`gpt-6-astra`) makes the final BUY_CALL / BUY_PUT / WAIT / EXIT_ALL decision.** The AI cannot override the hard session/risk rules.
 
 ## Core rules
 - **Decision timeframe:** NIFTY SPOT 15-minute candles.
 - **Execution timeframes:** 5-minute and 1-minute candles on the selected option strike/premium.
-- **Indicators:** 9 EMA, 21 EMA and VWAP are confirmation tools, not standalone signals.
-- **Structure:** previous-session support/resistance.
-- **Price action:** engulfing candles, pin bars, breakouts/breakdowns, EMA pullback/reclaim/rejection.
+- **Price action first:** market structure, support/resistance, breakouts/retests/rejections and candle confirmation are primary evidence.
+- **Indicators:** 9 EMA, 21 EMA and VWAP are confirmation/context, not standalone signals.
 - **Trading window:** 09:30–15:15 IST only.
-- **Square-off:** positions are force-closed before 15:15 (default guard begins 15:10).
-- **No carry forward. No BTST.** Every position must be flat by the end of the session.
-- **Default mode:** paper trading. Live broker order routing should remain disabled until the strategy passes replay/backtest and paper-trading gates.
+- **Force square-off:** from 15:10 IST; no new trades in the square-off window.
+- **No carry forward. No BTST.** Every position must be flat before the session ends.
+- **AI decision:** GPT-6 Astra is the source of the trade decision.
+- **Default mode:** paper trading. Live broker routing is intentionally disabled.
 
-## Multi-timeframe flow
+## Virtual environment — required
 
-`NIFTY SPOT 15M → directional bias → OPTION 5M setup → OPTION 1M trigger → risk guard → paper order`
+Do not install project dependencies globally. Use the project virtual environment for local development, tests and execution.
 
-A 5M/1M signal cannot override a neutral 15M spot bias.
-
-## Run
-
+### Linux/macOS
 ```bash
-pip install -r requirements.txt
-uvicorn app.main:app --reload
+./scripts/setup_venv.sh
+source .venv/bin/activate
+python -m pytest
+python -m uvicorn app.main:app --reload
 ```
+
+### Windows PowerShell
+```powershell
+.\scripts\setup_venv.ps1
+.\.venv\Scripts\Activate.ps1
+python -m pytest
+python -m uvicorn app.main:app --reload
+```
+
+Create `.env` from `.env.example` and set `OPENAI_API_KEY`. The API integration uses the OpenAI Responses API with `model="gpt-6-astra"` and structured JSON output.
 
 Open `http://127.0.0.1:8000`.
 
-## CSV format
+## Safety boundary
 
-`time,open,high,low,close,volume`
+ASTRA can decide the trade direction, but it cannot bypass the hard session guard. Before 09:30, after 15:15, or during the 15:10 square-off window, the application blocks new entries or exits as required.
 
-The uploaded series is resampled into 15M, 5M and 1M views. For production broker integration, timestamps should be validated as India Standard Time (IST), and option-contract selection/order routing should be implemented behind a broker adapter.
+This project does **not** contain live broker order routing yet. Before enabling live execution, add a broker adapter, option-chain/strike selection, order-status reconciliation, persistent paper ledger, replay/backtesting, slippage/fees, max-loss limits and a kill switch.
