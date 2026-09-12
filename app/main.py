@@ -3,11 +3,16 @@ from datetime import time
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
+from dotenv import load_dotenv
 import pandas as pd
 import numpy as np
 
 BASE = Path(__file__).resolve().parent.parent
-app = FastAPI(title="PulseTrade – NIFTY Intraday Price Action Bot", version="2.0.0")
+load_dotenv(BASE / ".env")
+
+from .astra_decision import decide as astra_decide, AstraDecisionError, ASTRA_MODEL
+
+app = FastAPI(title="PulseTrade – NIFTY Intraday Price Action Bot", version="3.0.0")
 app.mount('/static', StaticFiles(directory=BASE/'static'), name='static')
 
 TRADE_START = time(9, 30)
@@ -53,10 +58,8 @@ def candle_price_action(row, prev=None):
     bull_pin = lower >= max(body*2, rng*0.45) and close_pos >= 0.60
     bear_pin = upper >= max(body*2, rng*0.45) and close_pos <= 0.40
     if prev is not None:
-        bull_engulf = (prev.close < prev.open and row.close > row.open and
-                       row.open <= prev.close and row.close >= prev.open)
-        bear_engulf = (prev.close > prev.open and row.close < row.open and
-                       row.open >= prev.close and row.close <= prev.open)
+        bull_engulf = (prev.close < prev.open and row.close > row.open and row.open <= prev.close and row.close >= prev.open)
+        bear_engulf = (prev.close > prev.open and row.close < row.open and row.open >= prev.close and row.close <= prev.open)
         if bull_engulf: return 'bullish_engulfing'
         if bear_engulf: return 'bearish_engulfing'
     if bull_pin: return 'bullish_pin_bar'
@@ -132,40 +135,67 @@ def sample_data(freq='5min', n=500):
     vol = rng.integers(1000, 10000, n)
     return pd.DataFrame({'open':open_,'high':high,'low':low,'close':close,'volume':vol}, index=idx)
 
+
 @app.get('/')
 def home(): return FileResponse(BASE/'static/index.html')
 
+
 @app.get('/api/sample')
-def sample():
+async def sample():
     d15 = add_indicators(sample_data('15min'))
     d5 = add_indicators(sample_data('5min'))
+    d1 = add_indicators(sample_data('1min'))
     bias = spot_bias(d15)
-    entry = entry_signal(d5, bias['bias'])
+    entry5 = entry_signal(d5, bias['bias'])
+    entry1 = entry_signal(d1, bias['bias'])
+    ts = d1.index[-1]
+    guard = risk_guard(entry1.get('signal'), ts)
+    astra = {'decision':'WAIT','confidence':0,'setup':'ASTRA_NOT_CONFIGURED','reason':'Configure OPENAI_API_KEY in the virtual environment before ASTRA 6 can make a decision.','invalidations':[],'model':ASTRA_MODEL}
+    if guard['action'] == 'EXIT_ALL':
+        astra = {'decision':'EXIT_ALL','confidence':100,'setup':'session_square_off','reason':guard['reason'],'invalidations':[],'model':ASTRA_MODEL}
+    else:
+        try:
+            astra = await astra_decide(market='NIFTY', now_ts=str(ts), bias=bias, execution_5m=entry5, execution_1m=entry1, spot15=d15, opt5=d5, opt1=d1)
+        except AstraDecisionError as exc:
+            astra['reason'] = str(exc)
     latest = d5.tail(1).reset_index(names='time').replace({np.nan: None}).to_dict('records')[0]
-    return {'market':'NIFTY SPOT','session':{'start':'09:30','cutoff':'15:15','force_exit':'15:10','carry_forward':False},'spot_15m_bias':bias,'entry_5m':entry,'latest':latest}
+    return {'market':'NIFTY SPOT','session':{'start':'09:30','cutoff':'15:15','force_exit':'15:10','carry_forward':False,'btst':False},'decision_engine':{'provider':'OpenAI','model':ASTRA_MODEL,'source_of_trade_decision':True},'astra_decision':astra,'spot_15m_bias':bias,'entry_5m':entry5,'entry_1m':entry1,'risk_guard':guard,'latest':latest}
+
 
 @app.post('/api/analyze')
 async def analyze(file: UploadFile = File(...)):
-    if not file.filename.lower().endswith('.csv'): raise HTTPException(400,'Upload a CSV file')
+    if not file.filename.lower().endswith('.csv'):
+        raise HTTPException(400, 'Upload a CSV file')
     raw = await file.read()
     try:
         from io import BytesIO
         d0 = pd.read_csv(BytesIO(raw))
-        d0.columns = [str(c).lower().strip() for c in d0.columns]
-        if 'time' not in d0.columns: raise ValueError('CSV must contain time, open, high, low, close, volume')
-        d0['time'] = pd.to_datetime(d0['time']); d0 = d0.set_index('time').sort_index()
+        required = {'time','open','high','low','close','volume'}
+        if not required.issubset(d0.columns):
+            raise ValueError('CSV must contain time, open, high, low, close, volume')
+        d0['time'] = pd.to_datetime(d0['time'])
+        d0 = d0.set_index('time').sort_index()
         d15 = d0.resample('15min').agg({'open':'first','high':'max','low':'min','close':'last','volume':'sum'}).dropna()
         d5 = d0.resample('5min').agg({'open':'first','high':'max','low':'min','close':'last','volume':'sum'}).dropna()
         d1 = d0.resample('1min').agg({'open':'first','high':'max','low':'min','close':'last','volume':'sum'}).dropna()
         bias = spot_bias(d15)
         entry5 = entry_signal(d5, bias['bias'])
         entry1 = entry_signal(d1, bias['bias'])
-        guard = risk_guard('', d0.index[-1])
-        latest = add_indicators(d5).tail(1).reset_index(names='time').replace({np.nan: None}).to_dict('records')[0]
-        return {'market':'NIFTY SPOT','rules':{'decision_tf':'15M','execution_tf':['5M','1M'],'trade_window':'09:30-15:15','carry_forward':False,'btst':False},'spot_15m_bias':bias,'execution_5m':entry5,'execution_1m':entry1,'risk_guard':guard,'latest':latest}
+        guard = risk_guard(entry1.get('signal'), d0.index[-1])
+        if guard['action'] == 'EXIT_ALL':
+            astra = {'decision':'EXIT_ALL','confidence':100,'setup':'session_square_off','reason':guard['reason'],'invalidations':[],'model':ASTRA_MODEL}
+        elif guard['action'] == 'BLOCK':
+            astra = {'decision':'WAIT','confidence':100,'setup':'outside_trade_window','reason':guard['reason'],'invalidations':[],'model':ASTRA_MODEL}
+        else:
+            try:
+                astra = await astra_decide(market='NIFTY', now_ts=str(d0.index[-1]), bias=bias, execution_5m=entry5, execution_1m=entry1, spot15=d15, opt5=d5, opt1=d1)
+            except AstraDecisionError as exc:
+                astra = {'decision':'WAIT','confidence':0,'setup':'ASTRA_ERROR','reason':str(exc),'invalidations':[],'model':ASTRA_MODEL}
+        return {'market':'NIFTY SPOT','rules':{'decision_tf':'15M','execution_tf':['5M','1M'],'trade_window':'09:30-15:15 IST','carry_forward':False,'btst':False},'decision_engine':{'provider':'OpenAI','model':ASTRA_MODEL,'source_of_trade_decision':True},'spot_15m_bias':bias,'execution_5m':entry5,'execution_1m':entry1,'astra_decision':astra,'risk_guard':guard,'latest':d5.tail(1).reset_index(names='time').replace({np.nan: None}).to_dict('records')[0]}
     except Exception as e:
         raise HTTPException(400, str(e))
 
+
 @app.get('/api/health')
 def health():
-    return {'status':'ok','mode':'paper','market':'NIFTY','decision_timeframe':'15M','execution_timeframes':['5M','1M'],'trade_window':'09:30-15:15','force_exit':'15:10','carry_forward':False,'btst':False}
+    return {'status':'ok','mode':'paper','market':'NIFTY','decision_timeframe':'15M','execution_timeframes':['5M','1M'],'trade_window':'09:30-15:15 IST','force_exit':'15:10 IST','carry_forward':False,'btst':False,'decision_engine':{'provider':'OpenAI','model':ASTRA_MODEL,'source_of_trade_decision':True}}
