@@ -1,6 +1,5 @@
 from datetime import datetime
-from .config import CONFIG
-from .models import Position, TradeSignal
+from .models import Position
 
 class Terminal:
     @staticmethod
@@ -19,17 +18,19 @@ class Terminal:
         Terminal.clear()
         s = position.signal
         pnl = position.unrealized_pnl
+        base = position.entry_price * position.quantity
+        pct = (pnl / base * 100) if base else 0.0
         print("QUANTNIFTY | LIVE TRADE")
-        print(f"\nNIFTY: {s.symbol}")
-        print(f"OPTION: {s.option_type} {s.strike:g}")
+        print(f"\nOPTION: {s.symbol}")
+        print(f"STRIKE: {s.strike:g} {s.option_type}")
         print(f"\nENTRY: ₹{position.entry_price:.2f}")
         print(f"CURRENT: ₹{position.current_price:.2f}")
         print(f"STOP LOSS: ₹{s.stop:.2f}")
         print(f"TARGET: ₹{s.target:.2f}")
         print(f"QUANTITY: {position.quantity}")
         print(f"LIVE P&L: ₹{pnl:,.2f}")
-        print(f"P&L %: {(pnl/(position.entry_price*position.quantity)*100):.2f}%")
-        print(f"\nTIME: {datetime.now(CONFIG.__class__.__dict__.get('IST', None)) if False else datetime.now().strftime('%H:%M:%S')}")
+        print(f"P&L %: {pct:.2f}%")
+        print(f"TIME: {datetime.now().strftime('%H:%M:%S')}")
         print("\nSTATUS: TRADE ACTIVE")
 
     @staticmethod
@@ -38,10 +39,11 @@ class Terminal:
         s = position.signal
         pnl = position.realized_pnl
         print("TRADE CLOSED")
-        print(f"\nOPTION: {s.option_type} {s.strike:g}")
+        print(f"\nOPTION: {s.symbol}")
+        print(f"STRIKE: {s.strike:g} {s.option_type}")
         print(f"ENTRY: ₹{position.entry_price:.2f}")
         print(f"EXIT: ₹{position.exit_price:.2f}")
         print(f"QUANTITY: {position.quantity}")
-        print(f"NET P&L (before broker costs): ₹{pnl:,.2f}")
+        print(f"P&L (before broker costs): ₹{pnl:,.2f}")
         print(f"REASON: {position.exit_reason}")
         print("\nNO TRADE YET\nWaiting for next mathematical edge...")
