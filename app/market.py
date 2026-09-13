@@ -24,8 +24,8 @@ class IndstocksClient:
             raise RuntimeError(payload)
         return payload["data"]
 
-    async def place_order(self, security_id: str, qty: int, price: float, remarks: str):
-        payload = {"txn_type":"BUY", "exchange":"NSE", "segment":"DERIVATIVE", "product":"INTRADAY",
+    async def place_order(self, txn_type: str, security_id: str, qty: int, price: float, remarks: str):
+        payload = {"txn_type":txn_type, "exchange":"NSE", "segment":"DERIVATIVE", "product":"INTRADAY",
                    "order_type":"LIMIT", "limit_price":round(price,2), "validity":"DAY", "security_id":security_id,
                    "qty":qty, "algo_id":"99999", "is_amo":False, "remarks":remarks[:100]}
         r = await self.http.post("/order", json=payload)
@@ -55,8 +55,9 @@ def load_chain_into_state(state: MarketState, data: dict):
     state.spot = _num(data, "underlying_ltp")
     state.expiry = data.get("expiry")
     state.timestamp = datetime.now(IST)
-    state.spot_history.append(state.spot)
-    if len(state.spot_history) > 600: state.spot_history.pop(0)
+    if state.spot > 0:
+        state.spot_history.append(state.spot)
+        if len(state.spot_history) > 600: state.spot_history.pop(0)
     for strike_text, legs in data.get("strikes", {}).items():
         strike = float(strike_text)
         for option_type, raw in (("CE", legs.get("ce")), ("PE", legs.get("pe"))):
