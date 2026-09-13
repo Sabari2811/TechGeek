@@ -19,6 +19,7 @@ class OptionQuote:
     gamma: float = 0.0
     theta: float = 0.0
     vega: float = 0.0
+    lot_size: int = 1
 
     @property
     def oi_change(self) -> float:
