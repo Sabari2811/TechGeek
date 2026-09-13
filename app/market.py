@@ -24,6 +24,18 @@ class IndstocksClient:
             raise RuntimeError(payload)
         return payload["data"]
 
+    async def market_depth(self, security_ids: list[str]) -> dict:
+        """Return five-level depth snapshots for option contracts."""
+        codes = [f"NFO_{sid}" for sid in security_ids if sid]
+        if not codes:
+            return {}
+        r = await self.http.get("/market/quotes/mkt", params={"scrip-codes": ",".join(codes)})
+        r.raise_for_status()
+        payload = r.json()
+        if payload.get("status") != "success":
+            raise RuntimeError(payload)
+        return payload.get("data", {})
+
     async def contract_lot_size(self, expiry: str, strike: float, option_type: str) -> int:
         params = {"underlying":"NIFTY", "segment":"DERIVATIVE", "instrument_type":"OPTIDX",
                   "expiry":expiry, "option_type":option_type, "strike_from":strike, "strike_to":strike,
@@ -77,5 +89,6 @@ def load_chain_into_state(state: MarketState, data: dict):
                 strike, option_type, str(raw.get("security_id","")), str(raw.get("trading_symbol","")),
                 _num(raw,"last_price"), _num(raw,"top_bid_price","bid_price"), _num(raw,"top_ask_price","ask_price"),
                 _num(raw,"volume"), _num(raw,"oi"), _num(raw,"previous_oi"), _num(raw,"iv"),
-                _num(raw,"delta"), _num(raw,"gamma"), _num(raw,"theta"), _num(raw,"vega"))
+                _num(raw,"delta"), _num(raw,"gamma"), _num(raw,"theta"), _num(raw,"vega"),
+                int(_num(raw,"lot_size")) if _num(raw,"lot_size") > 0 else 1)
             state.options[state.key(strike, option_type)] = q
