@@ -1,5 +1,4 @@
 import asyncio
-from datetime import datetime
 from .config import CONFIG
 from .models import MarketState
 from .market import IndstocksClient, load_chain_into_state
@@ -89,10 +88,15 @@ async def run():
             signal.entry = q.ask
             signal.stop = max(q.ltp * 0.75, q.ltp - state.spot * 0.001)
             signal.target = q.ltp + (q.ltp - signal.stop) * 1.8
-            qty = risk.size(signal)
-            # Live lot-size validation is deliberately conservative until contract metadata is loaded.
+            lot_size = await client.contract_lot_size(expiry, signal.strike, signal.option_type)
+            if lot_size <= 0:
+                Terminal.waiting(state.spot, "Candidate rejected: lot size unavailable")
+                await asyncio.sleep(CONFIG.poll_seconds)
+                continue
+            raw_qty = risk.size(signal)
+            qty = (raw_qty // lot_size) * lot_size
             if qty <= 0:
-                Terminal.waiting(state.spot, "Candidate rejected: zero position size")
+                Terminal.waiting(state.spot, "Candidate rejected: position size is below one lot")
                 await asyncio.sleep(CONFIG.poll_seconds)
                 continue
             try:
