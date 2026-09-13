@@ -25,7 +25,6 @@ class IndstocksClient:
         return payload["data"]
 
     async def market_depth(self, security_ids: list[str]) -> dict:
-        """Return five-level depth snapshots for option contracts."""
         codes = [f"NFO_{sid}" for sid in security_ids if sid]
         if not codes:
             return {}
@@ -52,6 +51,11 @@ class IndstocksClient:
                    "order_type":"LIMIT", "limit_price":round(price,2), "validity":"DAY", "security_id":security_id,
                    "qty":qty, "algo_id":"99999", "is_amo":False, "remarks":remarks[:100]}
         r = await self.http.post("/order", json=payload)
+        r.raise_for_status()
+        return r.json()
+
+    async def cancel_order(self, order_id: str):
+        r = await self.http.post("/order/cancel", json={"order_id":order_id, "segment":"DERIVATIVE"})
         r.raise_for_status()
         return r.json()
 
