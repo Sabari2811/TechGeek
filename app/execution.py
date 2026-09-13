@@ -1,3 +1,4 @@
+import asyncio
 import uuid
 from datetime import datetime
 from .config import CONFIG
@@ -12,13 +13,43 @@ class ExecutionEngine:
     async def _live_order(self, txn_type: str, security_id: str, qty: int, price: float, tag: str):
         response = await self.client.place_order(txn_type, security_id, qty, price, tag)
         status = response.get("data", {}).get("order_status")
-        if status not in {"SUCCESS", "INITIATED", "PENDING", "PROCESSING"}:
+        if status not in {"SUCCESS", "INITIATED", "PENDING", "PROCESSING", "QUEUED", "PARTIALLY FILLED"}:
             raise RuntimeError(f"Order rejected: {response}")
-        orders = await self.client.order_book()
-        matches = [o for o in orders if o.get("remarks") == tag]
-        if not matches:
-            raise RuntimeError("Order accepted but could not be reconciled")
-        return matches[-1]
+        order_id = response.get("data", {}).get("order_id")
+        if not order_id:
+            raise RuntimeError("Broker accepted order but returned no order_id")
+
+        # Never assume an accepted order is filled. Reconcile repeatedly so a delayed
+        # exchange/broker fill cannot leave the strategy with false position state.
+        terminal = {"SUCCESS", "CANCELLED", "FAILED", "ABORTED", "EXPIRED",
+                    "PARTIALLY FILLED - CANCELLED", "PARTIALLY FILLED - EXPIRED"}
+        latest = None
+        for _ in range(10):
+            orders = await self.client.order_book()
+            matches = [o for o in orders if o.get("id") == order_id or o.get("remarks") == tag]
+            if matches:
+                latest = matches[-1]
+                latest_status = str(latest.get("status") or latest.get("order_status") or "").upper()
+                traded_qty = int(latest.get("traded_qty", 0) or 0)
+                if traded_qty > 0 and (latest_status == "SUCCESS" or latest_status.startswith("PARTIALLY FILLED")):
+                    return latest
+                if latest_status in terminal and traded_qty <= 0:
+                    raise RuntimeError(f"Order finished without a fill: {latest_status}")
+            await asyncio.sleep(0.5)
+
+        # A limit order that is still working is not a live position. Cancel the
+        # remaining quantity rather than allowing an old signal to fill later.
+        if latest:
+            current_status = str(latest.get("status") or "").upper()
+            if current_status not in terminal:
+                try:
+                    await self.client.cancel_order(str(latest.get("id") or order_id))
+                except Exception as exc:
+                    raise RuntimeError(f"Order remained pending and cancellation failed: {exc}") from exc
+            traded_qty = int(latest.get("traded_qty", 0) or 0)
+            if traded_qty > 0:
+                return latest
+        raise RuntimeError("Order not filled within reconciliation window; remaining quantity cancelled")
 
     async def enter(self, signal: TradeSignal, quantity: int) -> Position:
         signal.quantity = quantity
@@ -28,7 +59,7 @@ class ExecutionEngine:
             order = await self._live_order("BUY", signal.security_id, quantity, signal.entry, tag)
             traded_qty = int(order.get("traded_qty", 0) or 0)
             if traded_qty <= 0:
-                raise RuntimeError("Entry order accepted but not filled; refusing to create a live position")
+                raise RuntimeError("Entry order accepted but not filled")
             entry = float(order.get("traded_price") or signal.entry)
             qty = traded_qty
         self.position = Position(signal=signal, entry_price=entry, quantity=qty,
