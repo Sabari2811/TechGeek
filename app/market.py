@@ -24,6 +24,17 @@ class IndstocksClient:
             raise RuntimeError(payload)
         return payload["data"]
 
+    async def contract_lot_size(self, expiry: str, strike: float, option_type: str) -> int:
+        params = {"underlying":"NIFTY", "segment":"DERIVATIVE", "instrument_type":"OPTIDX",
+                  "expiry":expiry, "option_type":option_type, "strike_from":strike, "strike_to":strike,
+                  "page":1, "page_size":10}
+        r = await self.http.get("/market/instruments/search", params=params)
+        r.raise_for_status()
+        instruments = r.json().get("data", {}).get("instruments", [])
+        if not instruments:
+            raise RuntimeError("Selected option contract was not found in instruments search")
+        return int(instruments[0].get("lot_size") or 0)
+
     async def place_order(self, txn_type: str, security_id: str, qty: int, price: float, remarks: str):
         payload = {"txn_type":txn_type, "exchange":"NSE", "segment":"DERIVATIVE", "product":"INTRADAY",
                    "order_type":"LIMIT", "limit_price":round(price,2), "validity":"DAY", "security_id":security_id,
