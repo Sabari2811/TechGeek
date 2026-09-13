@@ -22,10 +22,12 @@ class Config:
     stale_seconds: float = float(os.getenv("STALE_SECONDS", "3"))
     strike_count: int = int(os.getenv("STRIKE_COUNT", "10"))
     poll_seconds: float = float(os.getenv("POLL_SECONDS", "2"))
-    start_time: time = time(9, 15)
+    # QuantNifty session policy: no new entries before 09:30 or after 15:15;
+    # force all positions flat from 15:10 onward.
+    start_time: time = time(9, 30)
     new_entry_cutoff: time = time(15, 15)
-    squareoff_time: time = time(15, 30)
-    end_time: time = time(15, 35)
+    squareoff_time: time = time(15, 10)
+    end_time: time = time(15, 15)
 
     def market_time(self):
         from datetime import datetime
@@ -33,7 +35,7 @@ class Config:
 
     def entries_allowed(self) -> bool:
         t = self.market_time()
-        return self.start_time <= t < self.new_entry_cutoff
+        return self.start_time <= t < self.new_entry_cutoff and t < self.squareoff_time
 
     def session_active(self) -> bool:
         t = self.market_time()
