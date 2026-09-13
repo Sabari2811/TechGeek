@@ -3,6 +3,7 @@ from .config import CONFIG
 from .models import MarketState
 from .market import IndstocksClient, load_chain_into_state
 from .math_engine import QuantEngine
+from .microstructure import MicrostructureEngine, MicrostructureState
 from .risk import RiskManager
 from .execution import ExecutionEngine
 from .terminal import Terminal
@@ -21,6 +22,7 @@ async def run():
         return
     client = IndstocksClient()
     state = MarketState()
+    micro_state = MicrostructureState()
     risk = RiskManager()
     execution = ExecutionEngine(client)
     expiry = None
@@ -85,9 +87,25 @@ async def run():
                 await asyncio.sleep(CONFIG.poll_seconds)
                 continue
 
+            # Five-level depth is a secondary confirmation layer. It can reject a
+            # mathematically attractive trade when the live book is thin or strongly
+            # absorbed. A sweep is a bonus signal, never a standalone entry rule.
+            try:
+                depth = await client.market_depth([q.security_id])
+                raw_depth = depth.get(f"NFO_{q.security_id}") or depth.get(q.security_id)
+                micro = MicrostructureEngine.from_depth(q.security_id, raw_depth or {}, micro_state)
+                confirmed, micro_reason = MicrostructureEngine.confirmation(micro)
+            except Exception as exc:
+                confirmed, micro_reason = False, f"depth feed unavailable: {exc}"
+            if not confirmed:
+                Terminal.waiting(state.spot, f"Candidate rejected by microstructure — {micro_reason}")
+                await asyncio.sleep(CONFIG.poll_seconds)
+                continue
+
             signal.entry = q.ask
             signal.stop = max(q.ltp * 0.75, q.ltp - state.spot * 0.001)
             signal.target = q.ltp + (q.ltp - signal.stop) * 1.8
+            signal.reason += f" | depth={micro_reason}"
             lot_size = await client.contract_lot_size(expiry, signal.strike, signal.option_type)
             if lot_size <= 0:
                 Terminal.waiting(state.spot, "Candidate rejected: lot size unavailable")
