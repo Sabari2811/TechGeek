@@ -29,7 +29,7 @@ async def run():
     try:
         while True:
             if not CONFIG.session_active():
-                Terminal.waiting(state.spot, "Outside market session. Run during 09:15–15:35 IST.")
+                Terminal.waiting(state.spot, "Outside market session. Run during 09:30–15:15 IST.")
                 await asyncio.sleep(30)
                 continue
             try:
@@ -119,7 +119,6 @@ async def run():
                 continue
             try:
                 p = await execution.enter(signal, qty)
-                risk.state.trades_today += 1
                 Terminal.active(p)
             except Exception as exc:
                 Terminal.waiting(state.spot, f"Execution blocked: {exc}")
