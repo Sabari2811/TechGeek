@@ -1,50 +1,98 @@
-# PulseTrade — NIFTY Intraday Price Action Bot
+# QuantNifty — Mathematical NIFTY Options Engine
 
-Simple, clean intraday NIFTY options trading application with **GPT-6 Astra as the final trade-decision engine**.
+Lightweight, terminal-first NIFTY options trading engine for local execution on a laptop during the NSE session.
 
-## Decision architecture
+## Design
 
-`NIFTY SPOT 15M → price-action/structure context → OPTION 5M setup → OPTION 1M trigger → GPT-6 Astra FINAL DECISION → hard risk guard → paper order`
+`INDstocks API → in-memory market state → deterministic quantitative engine → risk/anomaly gate → execution → terminal`
 
-The deterministic strategy computes evidence. **GPT-6 Astra (`gpt-6-astra`) makes the final BUY_CALL / BUY_PUT / WAIT / EXIT_ALL decision.** The AI cannot override the hard session/risk rules.
+The live hot path does not depend on a browser, database, dashboard, or LLM. The terminal is only an operator display. The system starts in **PAPER** mode and must be validated before any live order routing is enabled.
 
-## Core rules
-- **Decision timeframe:** NIFTY SPOT 15-minute candles.
-- **Execution timeframes:** 5-minute and 1-minute candles on the selected option strike/premium.
-- **Price action first:** market structure, support/resistance, breakouts/retests/rejections and candle confirmation are primary evidence.
-- **Indicators:** 9 EMA, 21 EMA and VWAP are confirmation/context, not standalone signals.
-- **Trading window:** 09:30–15:15 IST only.
-- **Force square-off:** from 15:10 IST; no new trades in the square-off window.
-- **No carry forward. No BTST.** Every position must be flat before the session ends.
-- **AI decision:** GPT-6 Astra is the source of the trade decision.
-- **Default mode:** paper trading. Live broker routing is intentionally disabled.
+INDstocks currently provides a live NIFTY option-chain endpoint with LTP, OI, volume, top-of-book bid/ask, IV and Greeks, plus WebSocket market/order streams. The application uses the option-chain REST endpoint for the first stable implementation and keeps a WebSocket adapter ready for the low-latency path. citeturn1search0turn1search1
 
-## Virtual environment — required
+## Quantitative core
 
-Do not install project dependencies globally. Use the project virtual environment for local development, tests and execution.
+- realized volatility
+- implied volatility
+- probability model
+- option fair-value proxy
+- expected payoff / expected value
+- liquidity and spread checks
+- position sizing
+- daily loss and trade-count limits
+- anomaly/circuit-breaker guard
+- target / stop / session square-off
 
-### Linux/macOS
-```bash
-./scripts/setup_venv.sh
-source .venv/bin/activate
-python -m pytest
-python -m uvicorn app.main:app --reload
+Advanced components planned next: calibrated option pricing, volatility surface/skew, regime detection, Bayesian updating, Monte Carlo, tail risk, risk of ruin, fractional Kelly, and walk-forward validation.
+
+## Terminal behaviour
+
+Idle:
+
+```text
+QUANTNIFTY | LIVE
+NIFTY: 24,587.35
+NO TRADE YET
+Waiting for mathematical edge...
 ```
 
-### Windows PowerShell
+Active position:
+
+```text
+QUANTNIFTY | LIVE TRADE
+ENTRY: ₹108.50
+CURRENT: ₹114.20
+STOP LOSS: ₹88.00
+TARGET: ₹145.00
+LIVE P&L: ₹7,143.00
+STATUS: TRADE ACTIVE
+```
+
+## Setup — Windows PowerShell
+
 ```powershell
-.\scripts\setup_venv.ps1
+python -m venv .venv
 .\.venv\Scripts\Activate.ps1
-python -m pytest
-python -m uvicorn app.main:app --reload
+python -m pip install --upgrade pip
+pip install -r requirements.txt
+Copy-Item .env.example .env
 ```
 
-Create `.env` from `.env.example` and set `OPENAI_API_KEY`. The API integration uses the OpenAI Responses API with `model="gpt-6-astra"` and structured JSON output.
+Put the INDstocks access token in `.env`. The API uses `Authorization: <access_token>` and the base URL is `https://api.indstocks.com`. citeturn3search7
 
-Open `http://127.0.0.1:8000`.
+Run tests:
 
-## Safety boundary
+```powershell
+python -m pytest -q
+```
 
-ASTRA can decide the trade direction, but it cannot bypass the hard session guard. Before 09:30, after 15:15, or during the 15:10 square-off window, the application blocks new entries or exits as required.
+Run the terminal engine:
 
-This project does **not** contain live broker order routing yet. Before enabling live execution, add a broker adapter, option-chain/strike selection, order-status reconciliation, persistent paper ledger, replay/backtesting, slippage/fees, max-loss limits and a kill switch.
+```powershell
+python -m app.main
+```
+
+## Modes
+
+`TRADING_MODE=PAPER` is the default.
+
+Use `LIVE` only after paper trading, backtesting and execution-safety validation. Live order routing uses INDstocks' `/order` endpoint with derivative/intraday validation and order reconciliation. INDstocks documents order-status and trade-book reconciliation APIs; the application should never assume an accepted order is filled without reconciliation. citeturn2view0
+
+## Safety
+
+- no secrets committed to Git
+- no new entries outside the session entry window
+- maximum trades per day
+- maximum daily loss
+- abnormal spot-move block
+- option spread/liquidity block
+- position-level stop and target
+- session square-off
+- broker order reconciliation
+- paper mode by default
+
+A stop price is not a guaranteed maximum loss during gaps or illiquidity. This is a risk-control system, not a guarantee against market loss.
+
+## Important
+
+This software is an engineering/research system, not a promise of profitability. Every quantitative rule must be validated out of sample with realistic fees and slippage before live use.
