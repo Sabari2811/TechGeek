@@ -1,4 +1,6 @@
-from app.market import extract_market_depth
+import pytest
+
+from app.market import IndstocksClient, extract_market_depth
 
 
 def sample_depth():
@@ -43,5 +45,82 @@ def test_extract_depth_list_wrapper():
     assert result.get("market_depth", {}).get("depth")
 
 
+def test_extract_depth_bid_ask_array_fallback():
+    raw = {"data": {"NFO_47273": {"bids": [{"quantity": 100, "price": 10}],
+                                   "asks": [{"quantity": 120, "price": 10.1}]}}}
+    result = extract_market_depth(raw, "47273")
+    assert result["market_depth"]["depth"][0]["buy"]["quantity"] == 100
+    assert result["market_depth"]["depth"][0]["sell"]["quantity"] == 120
+
+
 def test_extract_depth_missing_returns_empty():
     assert extract_market_depth({"NFO_1": {}}, "47273") == {}
+
+
+class FakeResponse:
+    def __init__(self, payload):
+        self.payload = payload
+
+    def raise_for_status(self):
+        return None
+
+    def json(self):
+        return self.payload
+
+
+class FakeHttp:
+    def __init__(self, mkt_payload, full_payload):
+        self.mkt_payload = mkt_payload
+        self.full_payload = full_payload
+        self.paths = []
+
+    async def get(self, path, **kwargs):
+        self.paths.append(path)
+        if path == "/market/quotes/mkt":
+            return FakeResponse(self.mkt_payload)
+        if path == "/market/quotes/full":
+            return FakeResponse(self.full_payload)
+        raise AssertionError(path)
+
+
+@pytest.mark.asyncio
+async def test_market_depth_uses_full_quote_fallback_when_mkt_has_no_depth():
+    mkt = {"status": "success", "data": {"NFO_47273": {"ltp": 10.0}}}
+    full = {"status": "success", "data": sample_depth()}
+    client = IndstocksClient()
+    client.http = FakeHttp(mkt, full)
+    result = await client.market_depth(["47273"])
+    assert extract_market_depth(result, "47273")
+    assert client.http.paths == ["/market/quotes/mkt", "/market/quotes/full"]
+
+
+@pytest.mark.asyncio
+async def test_market_depth_does_not_fallback_when_mkt_has_depth():
+    mkt = {"status": "success", "data": sample_depth()}
+    full = {"status": "success", "data": {}}
+    client = IndstocksClient()
+    client.http = FakeHttp(mkt, full)
+    result = await client.market_depth(["47273"])
+    assert extract_market_depth(result, "47273")
+    assert client.http.paths == ["/market/quotes/mkt"]
+
+
+@pytest.mark.asyncio
+async def test_market_depth_returns_full_response_even_without_depth():
+    mkt = {"status": "success", "data": {"NFO_47273": {"ltp": 10.0}}}
+    full = {"status": "success", "data": {"NFO_47273": {"ltp": 10.1}}}
+    client = IndstocksClient()
+    client.http = FakeHttp(mkt, full)
+    result = await client.market_depth(["47273"])
+    assert result == full
+    assert extract_market_depth(result, "47273") == {}
+
+
+@pytest.mark.asyncio
+async def test_market_depth_rejects_provider_error():
+    mkt = {"status": "error", "message": "unavailable"}
+    full = {"status": "success", "data": sample_depth()}
+    client = IndstocksClient()
+    client.http = FakeHttp(mkt, full)
+    with pytest.raises(RuntimeError):
+        await client.market_depth(["47273"])
