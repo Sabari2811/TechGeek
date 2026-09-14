@@ -6,6 +6,7 @@ from .math_engine import QuantEngine
 from .microstructure import MicrostructureEngine, MicrostructureState
 from .risk import RiskManager
 from .execution import ExecutionEngine
+from .learning import IncrementalLearner
 from .terminal import Terminal
 
 
@@ -27,11 +28,14 @@ async def run():
     state = MarketState()
     micro_state = MicrostructureState()
     risk = RiskManager()
+    learning = IncrementalLearner()
     execution = ExecutionEngine(client)
     expiry = None
 
     try:
         while True:
+            learning.learn_if_new_day()
+
             if not CONFIG.session_active():
                 Terminal.waiting(state.spot, "Outside market session. Run during 09:30–15:15 IST.")
                 await asyncio.sleep(30)
@@ -55,12 +59,14 @@ async def run():
                     if q.ltp <= p.signal.stop:
                         closed = await execution.exit(q.bid or q.ltp, "STOP LOSS")
                         risk.record_trade(closed.realized_pnl)
+                        learning.record(p.signal, closed.realized_pnl)
                         Terminal.closed(closed, state.spot)
                         await asyncio.sleep(1)
                         continue
                     if q.ltp >= p.signal.target:
                         closed = await execution.exit(q.bid or q.ltp, "TARGET")
                         risk.record_trade(closed.realized_pnl)
+                        learning.record(p.signal, closed.realized_pnl)
                         Terminal.closed(closed, state.spot)
                         await asyncio.sleep(1)
                         continue
@@ -69,6 +75,7 @@ async def run():
                     price = q.bid if q and q.bid > 0 else (q.ltp if q else p.current_price)
                     closed = await execution.exit(price, "SESSION SQUARE-OFF")
                     risk.record_trade(closed.realized_pnl)
+                    learning.record(p.signal, closed.realized_pnl)
                     Terminal.closed(closed, state.spot)
                     await asyncio.sleep(1)
                     continue
@@ -79,31 +86,21 @@ async def run():
 
             allowed, reason = risk.check_market(state)
             if not allowed:
-                Terminal.waiting(
-                    state.spot,
-                    f"NO TRADE — {reason}",
-                    {"Session / risk": False, "Mathematical edge": False},
-                )
+                Terminal.waiting(state.spot, f"NO TRADE — {reason}", {"Session / risk": False, "Mathematical edge": False})
                 await asyncio.sleep(CONFIG.poll_seconds)
                 continue
 
-            signal = QuantEngine.best_signal(state, CONFIG.min_net_ev)
+            signal = QuantEngine.best_signal(state, CONFIG.min_net_ev, learner=learning)
             if not signal:
-                Terminal.waiting(
-                    state.spot,
-                    "No candidate meets the minimum mathematical EV.",
-                    {"Session / risk": True, "Minimum net EV": False},
-                )
+                Terminal.waiting(state.spot, "No candidate meets the minimum mathematical EV.", {"Session / risk": True, "Minimum net EV": False})
                 await asyncio.sleep(CONFIG.poll_seconds)
                 continue
 
             q = state.get_option(signal.strike, signal.option_type)
             if not q or q.ask <= 0 or q.spread_pct > CONFIG.max_spread_pct:
-                Terminal.waiting(
-                    state.spot,
-                    "Candidate rejected by execution-quality guard.",
-                    {**getattr(signal, "checks", {}), "Liquidity / spread": False},
-                )
+                checks = dict(signal.checks)
+                checks["Liquidity / spread"] = False
+                Terminal.waiting(state.spot, "Candidate rejected by execution-quality guard.", checks)
                 await asyncio.sleep(CONFIG.poll_seconds)
                 continue
 
@@ -113,20 +110,16 @@ async def run():
                 micro = MicrostructureEngine.from_depth(q.security_id, raw_depth or {}, micro_state)
                 confirmed, micro_reason = MicrostructureEngine.confirmation(micro)
             except Exception as exc:
-                micro = None
                 confirmed, micro_reason = False, f"depth feed unavailable: {exc}"
 
-            # Microstructure is an execution-quality safety layer, not a standalone
-            # directional trigger. It can reject a trade but does not need to predict it.
+            checks = dict(signal.checks)
+            checks["Liquidity / spread"] = q.spread_pct <= CONFIG.max_spread_pct
+            checks["Microstructure confirmation"] = confirmed
+            checks["Risk / session"] = True
+            signal.checks = checks
+
             if not confirmed:
-                checks = dict(getattr(signal, "checks", {}))
-                checks["Liquidity / spread"] = q.spread_pct <= CONFIG.max_spread_pct
-                checks["Microstructure confirmation"] = False
-                Terminal.waiting(
-                    state.spot,
-                    f"Candidate rejected — {micro_reason}",
-                    checks,
-                )
+                Terminal.waiting(state.spot, f"Candidate rejected — {micro_reason}", checks)
                 await asyncio.sleep(CONFIG.poll_seconds)
                 continue
 
@@ -134,11 +127,6 @@ async def run():
             signal.stop = max(q.ltp * 0.75, q.ltp - state.spot * 0.001)
             signal.target = q.ltp + (q.ltp - signal.stop) * 1.8
             signal.reason += f" | depth={micro_reason}"
-            checks = dict(getattr(signal, "checks", {}))
-            checks["Liquidity / spread"] = q.spread_pct <= CONFIG.max_spread_pct
-            checks["Microstructure confirmation"] = True
-            checks["Risk / session"] = True
-            signal.checks = checks
 
             lot_size = await client.contract_lot_size(expiry, signal.strike, signal.option_type)
             if lot_size <= 0:
@@ -162,7 +150,6 @@ async def run():
             await asyncio.sleep(CONFIG.poll_seconds)
 
     except KeyboardInterrupt:
-        # Keep shutdown output to a single final screen rather than a log stream.
         Terminal.waiting(state.spot, "Stopped by user.")
     finally:
         await client.close()
