@@ -101,7 +101,6 @@ def extract_market_depth(data: dict, security_id: str) -> dict:
     sid = str(security_id)
     keys = [f"NFO_{sid}", f"NFO:{sid}", f"NFO-{sid}", f"NSE_{sid}", f"NSE:{sid}", f"NSE-{sid}", sid]
 
-    # Provider normally returns {status, data: {NFO_<id>: {market_depth: ...}}}.
     for root in (data, data.get("data")):
         if not isinstance(root, dict):
             continue
@@ -112,7 +111,6 @@ def extract_market_depth(data: dict, security_id: str) -> dict:
                 if found:
                     return found
 
-    # Explicit list wrappers with an instrument/security identifier.
     for root in (data, data.get("data")):
         if not isinstance(root, dict):
             continue
@@ -128,8 +126,20 @@ def extract_market_depth(data: dict, security_id: str) -> dict:
                         if found:
                             return found
 
-    # Direct single-security payload.
     return _extract_market_depth_object(data)
+
+
+def summarize_market_depth_payload(data: dict, security_id: str) -> str:
+    """Return a short safe diagnostic summary without exposing sensitive headers/tokens."""
+    sid = str(security_id)
+    if not isinstance(data, dict):
+        return f"response_type={type(data).__name__}"
+    status = data.get("status")
+    root = data.get("data") if isinstance(data.get("data"), dict) else data
+    keys = list(root.keys())[:8] if isinstance(root, dict) else []
+    matched = [k for k in keys if str(k) in {f"NFO_{sid}", f"NFO:{sid}", f"NSE_{sid}", f"NSE:{sid}", sid}]
+    has_depth = bool(extract_market_depth(data, sid))
+    return f"status={status!r} keys={keys!r} matched={matched!r} depth_found={has_depth}"
 
 
 def _num(raw: dict, *names: str) -> float:
