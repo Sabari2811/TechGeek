@@ -54,7 +54,7 @@ class ExecutionEngine:
     async def enter(self, signal: TradeSignal, quantity: int) -> Position:
         signal.quantity = quantity
         entry, qty = signal.entry, quantity
-        if CONFIG.mode == "LIVE":
+        if CONFIG.live_enabled():
             tag = f"quantnifty/entry-{uuid.uuid4().hex[:12]}"
             order = await self._live_order("BUY", signal.security_id, quantity, signal.entry, tag)
             traded_qty = int(order.get("traded_qty", 0) or 0)
@@ -70,16 +70,16 @@ class ExecutionEngine:
         if not self.position:
             return None
         p = self.position
-        if CONFIG.mode == "LIVE":
-            tag = f"quantnifty/exit-{uuid.uuid4().hex[:10]}"
+        if CONFIG.live_enabled():
+            tag = f"quantnifty/exit-{uuid.uuid4().hex[:12]}"
             order = await self._live_order("SELL", p.signal.security_id, p.quantity, price, tag)
             traded_qty = int(order.get("traded_qty", 0) or 0)
             if traded_qty <= 0:
-                raise RuntimeError("Exit order accepted but not filled; keeping position state")
+                raise RuntimeError("Exit order accepted but not filled")
             p.exit_price = float(order.get("traded_price") or price)
+            p.quantity = traded_qty
         else:
             p.exit_price = price
         p.exit_reason = reason
-        p.current_price = p.exit_price
         self.position = None
         return p
