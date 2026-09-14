@@ -43,4 +43,8 @@ class Config:
         t = self.market_time()
         return self.start_time <= t <= self.end_time
 
+    def live_enabled(self) -> bool:
+        # Deliberate two-key safety: LIVE mode alone can never activate live orders.
+        return self.mode == "LIVE" and os.getenv("ENABLE_LIVE_TRADING", "NO").upper() == "YES"
+
 CONFIG = Config()
