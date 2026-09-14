@@ -21,12 +21,15 @@ class Terminal:
     @staticmethod
     def _header(spot: float = 0.0):
         Terminal.clear()
-        mode = CONFIG.trading_mode.upper()
+        mode = CONFIG.mode.upper()
         now = datetime.now(IST).strftime("%H:%M:%S")
         print("╔══════════════════════════════════════════════════════╗")
         print(f"║              QUANTNIFTY | {mode:<12}             ║")
         print("╠══════════════════════════════════════════════════════╣")
-        print(f"║ TIME     {now} IST     NIFTY     {spot:,.2f}          ║" if spot else f"║ TIME     {now} IST     NIFTY     --               ║")
+        if spot:
+            print(f"║ TIME     {now} IST     NIFTY     {spot:,.2f}          ║")
+        else:
+            print(f"║ TIME     {now} IST     NIFTY     --               ║")
         print("╚══════════════════════════════════════════════════════╝")
 
     @staticmethod
@@ -66,8 +69,7 @@ class Terminal:
         print("  Status      🟢 ACTIVE")
 
         print("\nCHECKLIST")
-        checks = getattr(s, "checks", {})
-        for label, passed in checks.items():
+        for label, passed in getattr(s, "checks", {}).items():
             print(Terminal._check(label, passed))
 
     @staticmethod
