@@ -31,8 +31,6 @@ class IndstocksClient:
         if not codes:
             return {}
         params = {"scrip-codes": ",".join(codes)}
-
-        # Primary five-level depth endpoint.
         r = await self.http.get("/market/quotes/mkt", params=params)
         r.raise_for_status()
         payload = r.json()
@@ -113,7 +111,6 @@ def extract_market_depth(data: dict, security_id: str) -> dict:
     if found:
         return found
 
-    # Common list wrappers with an explicit security identifier.
     for container_key in ("data", "results", "quotes", "instruments", "items"):
         items = data.get(container_key)
         if isinstance(items, list):
@@ -128,7 +125,6 @@ def extract_market_depth(data: dict, security_id: str) -> dict:
                     if found:
                         return found
 
-    # Single-security mapping/list fallbacks.
     dict_values = [v for v in data.values() if isinstance(v, dict)]
     if len(dict_values) == 1:
         found = _unwrap_depth(dict_values[0])
