@@ -2,22 +2,28 @@
 
 Lightweight, terminal-first NIFTY options trading engine for local execution on a laptop during the NSE session.
 
-## Architecture
+## Final architecture
 
-`INDstocks → market state → deterministic quantitative engine → microstructure confirmation → risk/anomaly gate → execution/reconciliation → terminal`
+`INDstocks → market state → deterministic mathematical scoring → execution-quality confirmation → risk/anomaly gate → order reconciliation → single-screen terminal`
 
-The live hot path does not depend on a browser, database, dashboard, or LLM. The terminal is only an operator display. The system starts in **PAPER** mode and must be validated before any live order routing is enabled.
+The live hot path does **not** use EMA, VWAP, moving-average signals, a browser, database, or LLM. The terminal is only an operator display. The system starts in **PAPER** mode and must be validated before live order routing is enabled.
 
-The INDstocks API provides a live NIFTY option-chain endpoint with LTP, OI, volume, top-of-book bid/ask, IV and Greeks. It also provides five-level market depth through the market-depth quote endpoint and WebSocket streams for market data and order updates. The implementation uses the option-chain REST endpoint for stable snapshots and five-level depth as a secondary microstructure confirmation layer.
+The design deliberately avoids turning every metric into a mandatory gate. Mathematical variables contribute evidence to a composite score; only core safety conditions such as minimum net EV, execution quality, risk limits, anomaly protection and session rules can block an otherwise valid candidate.
+
+The INDstocks API provides a live NIFTY option-chain endpoint with LTP, OI, volume, top-of-book bid/ask, IV and Greeks. It also provides five-level market depth through the market-depth quote endpoint and WebSocket streams for market data and order updates. The implementation uses the option-chain REST endpoint for stable snapshots and five-level depth as a secondary execution-quality confirmation layer.
 
 ## Quantitative core
 
-- realized volatility
+- log-return / realized-volatility statistics
 - implied volatility
+- IV / realized-volatility relationship
 - probability model
 - option fair-value research proxy
-- expected payoff / expected value
-- liquidity and spread checks
+- expected payoff / expected value / net EV
+- soft mathematical evidence score
+- OI and volume participation
+- option Greeks
+- bid/ask spread and liquidity
 - five-level order-book imbalance
 - liquidity depletion / sweep proxy
 - absorption detection
@@ -28,7 +34,9 @@ The INDstocks API provides a live NIFTY option-chain endpoint with LTP, OI, volu
 - target / stop / session square-off
 - broker order reconciliation
 
-Microstructure is **not** a standalone BUY/SELL trigger. A sweep is treated as confirmation only; strong absorption, thin liquidity, or severe opposing pressure can reject an otherwise attractive mathematical candidate. Hidden orders and every market participant's fills are not observable from this public feed, so the engine deliberately reports observed book behaviour rather than claiming to identify institutions or manipulation.
+The score is intentionally **not** a 20-gate checklist. For example, OI activity, volatility evidence and Greeks can strengthen or weaken a candidate without independently vetoing it. This is intended to prevent over-filtering and preserve a practical 1–3 trade/day operating profile.
+
+Microstructure is **not** a standalone BUY/SELL trigger. A sweep is treated as confirmation only; strong absorption, thin liquidity, or severe opposing pressure can reject an otherwise attractive mathematical candidate. Hidden orders and every market participant's fills are not observable from this public feed, so the engine reports observed book behaviour rather than claiming to identify institutions or manipulation.
 
 Advanced components remain separated for later validation: calibrated option pricing, volatility surface/skew, regime detection, Bayesian updating, Monte Carlo, tail risk, risk of ruin, fractional Kelly, trade-print classification, and walk-forward validation.
 
@@ -38,25 +46,48 @@ Live orders are correlated with an internal remark/tag. An accepted order is **n
 
 ## Terminal behaviour
 
-Idle:
+The terminal is a **single live screen**. Market updates overwrite the current screen instead of appending a scrolling log.
+
+It intentionally shows only:
+
+1. **Signal** — option, entry, stop, target, quantity, probability, net EV and score.
+2. **Live trade monitor** — entry, current price, live P&L, stop, target and status.
+3. **Checklist** — the mathematical evidence and safety criteria currently supporting the candidate.
+
+Example:
 
 ```text
-QUANTNIFTY | LIVE
-NIFTY: 24,587.35
-NO TRADE YET
-Waiting for mathematical edge...
-```
+╔══════════════════════════════════════════════════════╗
+║              QUANTNIFTY | PAPER                     ║
+╠══════════════════════════════════════════════════════╣
+║ TIME     10:42:18 IST     NIFTY     25,184.35       ║
+╚══════════════════════════════════════════════════════╝
 
-Active position:
+SIGNAL
+  🟢 BUY NIFTY 25200 CE
+  Entry ₹187.40   SL ₹175.20   Target ₹208.50
+  Qty 75   Probability 67.2%   Net EV ₹14.82   Score 84.1
 
-```text
-QUANTNIFTY | LIVE TRADE
-ENTRY: ₹108.50
-CURRENT: ₹114.20
-STOP LOSS: ₹88.00
-TARGET: ₹145.00
-LIVE P&L: ₹7,143.00
-STATUS: TRADE ACTIVE
+LIVE TRADE
+  Entry       ₹187.40
+  Current     ₹192.80
+  Live P&L    ₹405.00 (+2.88%)
+  Stop        ₹175.20
+  Target      ₹208.50
+  Status      🟢 ACTIVE
+
+CHECKLIST
+  ✓ Mathematical valuation       PASS
+  ✓ Probability evidence         PASS
+  ✓ IV / RV data                 PASS
+  ✓ OI activity                  PASS
+  ✓ Volume activity              PASS
+  ✓ Greeks available             PASS
+  ✓ Positive net EV              PASS
+  ✓ Spread within limit          PASS
+  ✓ Liquidity / spread           PASS
+  ✓ Microstructure confirmation  PASS
+  ✓ Risk / session               PASS
 ```
 
 ## Setup — Windows PowerShell
@@ -92,15 +123,18 @@ Use `LIVE` only after paper trading, backtesting and execution-safety validation
 ## Safety
 
 - no secrets committed to Git
-- no new entries outside the configured session entry window
+- no EMA/VWAP or moving-average entry logic
+- no new entries outside the configured 09:30–15:10 IST entry window
+- session ends at 15:15 IST
 - maximum trades per day
 - maximum daily loss
 - abnormal spot-move block
+- minimum net EV
 - option spread/liquidity block
 - five-level microstructure confirmation
 - broker-reported lot-size validation
 - position-level stop and target
-- session square-off
+- forced session square-off from 15:10 IST
 - pending/partial-fill reconciliation
 - paper mode by default
 
