@@ -50,9 +50,12 @@ class MarketState:
         if price > 0:
             self.spot = price
             self.timestamp = timestamp
-            self.spot_history.append(price)
-            if len(self.spot_history) > 600:
-                self.spot_history.pop(0)
+            # Do not let repeated identical polling observations masquerade as
+            # independent price movement in the pre-breakout detector.
+            if not self.spot_history or self.spot_history[-1] != price:
+                self.spot_history.append(price)
+                if len(self.spot_history) > 600:
+                    self.spot_history.pop(0)
 
     def key(self, strike: float, option_type: str) -> str:
         return f"{strike:.2f}:{option_type.upper()}"
@@ -80,6 +83,8 @@ class TradeSignal:
     score: float = 0.0
     checks: Dict[str, bool] = field(default_factory=dict)
     score_components: Dict[str, float] = field(default_factory=dict)
+    market_phase: str = "UNKNOWN"
+    direction_bias: str = "NEUTRAL"
 
 
 @dataclass
