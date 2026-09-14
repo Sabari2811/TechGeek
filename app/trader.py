@@ -2,7 +2,7 @@ import asyncio
 from datetime import datetime
 from .config import CONFIG
 from .models import MarketState
-from .market import IndstocksClient, load_chain_into_state
+from .market import IndstocksClient, load_chain_into_state, extract_market_depth
 from .math_engine import QuantEngine
 from .microstructure import MicrostructureEngine, MicrostructureState
 from .risk import RiskManager
@@ -114,9 +114,9 @@ async def run():
                 continue
 
             try:
-                depth = await client.market_depth([q.security_id])
-                raw_depth = depth.get(f"NFO_{q.security_id}") or depth.get(q.security_id)
-                micro = MicrostructureEngine.from_depth(q.security_id, raw_depth or {}, micro_state)
+                depth_data = await client.market_depth([q.security_id])
+                raw_depth = extract_market_depth(depth_data, q.security_id)
+                micro = MicrostructureEngine.from_depth(q.security_id, raw_depth, micro_state)
                 confirmed, micro_reason = MicrostructureEngine.confirmation(micro)
             except Exception as exc:
                 confirmed, micro_reason = False, f"depth feed unavailable: {exc}"
