@@ -26,7 +26,7 @@ class IndstocksClient:
         return payload["data"]
 
     async def market_depth(self, security_ids: list[str]) -> dict:
-        """Return provider depth for the requested NFO contracts."""
+        """Return the raw successful provider payload for requested NFO contracts."""
         codes = [f"NFO_{sid}" for sid in security_ids if sid]
         if not codes:
             return {}
@@ -34,9 +34,9 @@ class IndstocksClient:
         r = await self.http.get("/market/quotes/mkt", params=params)
         r.raise_for_status()
         payload = r.json()
-        if payload.get("status") == "success":
-            return payload.get("data", {})
-        raise RuntimeError(payload)
+        if payload.get("status") != "success":
+            raise RuntimeError(payload)
+        return payload
 
     async def contract_lot_size(self, expiry: str, strike: float, option_type: str) -> int:
         params = {"underlying":"NIFTY", "segment":"DERIVATIVE", "instrument_type":"OPTIDX",
@@ -69,78 +69,74 @@ class IndstocksClient:
 
     async def stream(self, instruments: list[str]):
         url = "wss://ws-prices.indstocks.com/api/v1/ws/prices"
-        async with websockets.connect(url, additional_headers={"Authorization": CONFIG.access_token}, ping_interval=20, ping_timeout=10) as ws:
+        async with websockets.connect(url, additional_headers={"Authorization":CONFIG.access_token}, ping_interval=20, ping_timeout=10) as ws:
             await ws.send(json.dumps({"action":"subscribe","mode":"quote","instruments":instruments}))
             async for raw in ws:
                 yield json.loads(raw)
 
 
-def _unwrap_depth(value: dict) -> dict:
-    """Return a payload containing market_depth, regardless of common wrappers."""
+def _extract_market_depth_object(value) -> dict:
     if not isinstance(value, dict):
         return {}
-    if isinstance(value.get("market_depth"), dict):
+    if isinstance(value.get("market_depth"), dict) and isinstance(value["market_depth"].get("depth"), list):
         return value
     for key in ("data", "result", "quote", "quotes", "instrument", "item"):
         child = value.get(key)
         if isinstance(child, dict):
-            found = _unwrap_depth(child)
+            found = _extract_market_depth_object(child)
             if found:
                 return found
+        elif isinstance(child, list):
+            for item in child:
+                found = _extract_market_depth_object(item)
+                if found:
+                    return found
     return {}
 
 
 def extract_market_depth(data: dict, security_id: str) -> dict:
-    """Normalize INDstocks depth response wrappers for one security."""
+    """Normalize raw INDstocks market-depth payloads while preserving single-security data."""
     if not isinstance(data, dict) or not security_id:
         return {}
-
     sid = str(security_id)
-    candidates = [
-        f"NFO_{sid}", f"NFO:{sid}", f"NFO-{sid}",
-        f"NSE_{sid}", f"NSE:{sid}", f"NSE-{sid}",
-        sid,
-    ]
-    for key in candidates:
-        value = data.get(key)
-        found = _unwrap_depth(value) if isinstance(value, dict) else {}
-        if found:
-            return found
+    keys = [f"NFO_{sid}", f"NFO:{sid}", f"NFO-{sid}", f"NSE_{sid}", f"NSE:{sid}", f"NSE-{sid}", sid]
 
-    found = _unwrap_depth(data)
-    if found:
-        return found
+    # Provider normally returns {status, data: {NFO_<id>: {market_depth: ...}}}.
+    for root in (data, data.get("data")):
+        if not isinstance(root, dict):
+            continue
+        for key in keys:
+            value = root.get(key)
+            if isinstance(value, dict):
+                found = _extract_market_depth_object(value)
+                if found:
+                    return found
 
-    for container_key in ("data", "results", "quotes", "instruments", "items"):
-        items = data.get(container_key)
-        if isinstance(items, list):
-            for item in items:
-                if not isinstance(item, dict):
-                    continue
-                item_sid = str(item.get("security_id") or item.get("securityId") or
-                                item.get("scrip_code") or item.get("scripCode") or
-                                item.get("instrument_token") or item.get("instrumentToken") or "")
-                if item_sid == sid:
-                    found = _unwrap_depth(item)
-                    if found:
-                        return found
+    # Explicit list wrappers with an instrument/security identifier.
+    for root in (data, data.get("data")):
+        if not isinstance(root, dict):
+            continue
+        for container_key in ("results", "quotes", "instruments", "items"):
+            items = root.get(container_key)
+            if isinstance(items, list):
+                for item in items:
+                    if not isinstance(item, dict):
+                        continue
+                    item_sid = str(item.get("security_id") or item.get("securityId") or item.get("scrip_code") or item.get("scripCode") or item.get("instrument_token") or item.get("instrumentToken") or "")
+                    if item_sid == sid:
+                        found = _extract_market_depth_object(item)
+                        if found:
+                            return found
 
-    dict_values = [v for v in data.values() if isinstance(v, dict)]
-    if len(dict_values) == 1:
-        found = _unwrap_depth(dict_values[0])
-        if found:
-            return found
-
-    return {}
+    # Direct single-security payload.
+    return _extract_market_depth_object(data)
 
 
 def _num(raw: dict, *names: str) -> float:
     for name in names:
         if raw.get(name) is not None:
-            try:
-                return float(raw[name])
-            except (TypeError, ValueError):
-                pass
+            try: return float(raw[name])
+            except (TypeError, ValueError): pass
     return 0.0
 
 
@@ -150,13 +146,11 @@ def load_chain_into_state(state: MarketState, data: dict):
     state.timestamp = datetime.now(IST)
     if state.spot > 0:
         state.spot_history.append(state.spot)
-        if len(state.spot_history) > 600:
-            state.spot_history.pop(0)
+        if len(state.spot_history) > 600: state.spot_history.pop(0)
     for strike_text, legs in data.get("strikes", {}).items():
         strike = float(strike_text)
         for option_type, raw in (("CE", legs.get("ce")), ("PE", legs.get("pe"))):
-            if not raw:
-                continue
+            if not raw: continue
             q = OptionQuote(
                 strike, option_type, str(raw.get("security_id","")), str(raw.get("trading_symbol","")),
                 _num(raw,"last_price"), _num(raw,"top_bid_price","bid_price"), _num(raw,"top_ask_price","ask_price"),
