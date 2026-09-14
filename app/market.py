@@ -26,12 +26,24 @@ class IndstocksClient:
         return payload["data"]
 
     async def market_depth(self, security_ids: list[str]) -> dict:
-        """Return the raw successful provider payload for requested NFO contracts."""
+        """Return raw successful provider payload for requested NFO contracts."""
         codes = [f"NFO_{sid}" for sid in security_ids if sid]
         if not codes:
             return {}
         params = {"scrip-codes": ",".join(codes)}
         r = await self.http.get("/market/quotes/mkt", params=params)
+        r.raise_for_status()
+        payload = r.json()
+        if payload.get("status") != "success":
+            raise RuntimeError(payload)
+        return payload
+
+    async def market_quote_fallback(self, security_ids: list[str]) -> dict:
+        """Try full quote endpoint, which may also expose market_depth."""
+        codes = [f"NFO_{sid}" for sid in security_ids if sid]
+        if not codes:
+            return {}
+        r = await self.http.get("/market/quotes/full", params={"scrip-codes": ",".join(codes)})
         r.raise_for_status()
         payload = r.json()
         if payload.get("status") != "success":
