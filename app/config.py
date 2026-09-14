@@ -22,6 +22,8 @@ class Config:
     stale_seconds: float = float(os.getenv("STALE_SECONDS", "3"))
     strike_count: int = int(os.getenv("STRIKE_COUNT", "10"))
     poll_seconds: float = float(os.getenv("POLL_SECONDS", "2"))
+    risk_free_rate: float = float(os.getenv("RISK_FREE_RATE", "0.06"))
+    dividend_yield: float = float(os.getenv("DIVIDEND_YIELD", "0.01"))
     # QuantNifty session policy: no new entries before 09:30 or after 15:15;
     # force all positions flat from 15:10 onward.
     start_time: time = time(9, 30)
