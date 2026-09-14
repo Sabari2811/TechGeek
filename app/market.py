@@ -26,32 +26,49 @@ class IndstocksClient:
         return payload["data"]
 
     async def market_depth(self, security_ids: list[str]) -> dict:
-        """Return depth data, with full-quote fallback when /mkt is empty/unavailable."""
-        codes = [f"NFO_{sid}" for sid in security_ids if sid]
+        """Return depth data, trying documented response variants."""
+        ids = [str(sid) for sid in security_ids if sid]
+        codes = [f"NFO_{sid}" for sid in ids]
         if not codes:
             return {}
         params = {"scrip-codes": ",".join(codes)}
 
-        # Primary five-level depth endpoint.
+        # Primary five-level endpoint.
         try:
             r = await self.http.get("/market/quotes/mkt", params=params)
             r.raise_for_status()
             payload = r.json()
-            if payload.get("status") == "success":
-                data = payload.get("data", {})
-                if extract_market_depth(data, str(security_ids[0])):
-                    return data
+            data = payload.get("data", {}) if payload.get("status") == "success" else {}
+            if any(extract_market_depth(data, sid) for sid in ids):
+                return data
         except (httpx.HTTPError, ValueError):
             pass
 
-        # /quotes/full also contains market_depth and is a useful provider-side
-        # fallback when the dedicated market-depth response is empty/transient.
-        r = await self.http.get("/market/quotes/full", params=params)
-        r.raise_for_status()
-        payload = r.json()
-        if payload.get("status") != "success":
-            raise RuntimeError(payload)
-        return payload.get("data", {})
+        # Full quote endpoint also exposes market_depth.
+        try:
+            r = await self.http.get("/market/quotes/full", params=params)
+            r.raise_for_status()
+            payload = r.json()
+            data = payload.get("data", {}) if payload.get("status") == "success" else {}
+            if any(extract_market_depth(data, sid) for sid in ids):
+                return data
+        except (httpx.HTTPError, ValueError):
+            pass
+
+        # Some provider versions normalize the query using NSE_ prefix for
+        # index/derivative quote wrappers. Retry using the bare security IDs.
+        try:
+            bare_params = {"scrip-codes": ",".join(ids)}
+            r = await self.http.get("/market/quotes/full", params=bare_params)
+            r.raise_for_status()
+            payload = r.json()
+            data = payload.get("data", {}) if payload.get("status") == "success" else {}
+            if any(extract_market_depth(data, sid) for sid in ids):
+                return data
+        except (httpx.HTTPError, ValueError):
+            pass
+
+        return {}
 
     async def contract_lot_size(self, expiry: str, strike: float, option_type: str) -> int:
         params = {"underlying":"NIFTY", "segment":"DERIVATIVE", "instrument_type":"OPTIDX",
@@ -95,11 +112,13 @@ def extract_market_depth(data: dict, security_id: str) -> dict:
     if not isinstance(data, dict) or not security_id:
         return {}
 
+    sid = str(security_id)
     candidates = [
-        f"NFO_{security_id}",
-        f"NFO:{security_id}",
-        security_id,
-        str(security_id),
+        f"NFO_{sid}",
+        f"NFO:{sid}",
+        f"NSE_{sid}",
+        f"NSE:{sid}",
+        sid,
     ]
     for key in candidates:
         value = data.get(key)
@@ -109,16 +128,22 @@ def extract_market_depth(data: dict, security_id: str) -> dict:
     if data.get("market_depth"):
         return data
 
-    # Some broker wrappers use a list under data/results. Accept a matching id.
+    # Some broker wrappers use a list under data/results/quotes/instruments.
     for container_key in ("data", "results", "quotes", "instruments"):
         items = data.get(container_key)
         if isinstance(items, list):
             for item in items:
                 if not isinstance(item, dict):
                     continue
-                sid = str(item.get("security_id") or item.get("securityId") or item.get("scrip_code") or "")
-                if sid == str(security_id) and item.get("market_depth"):
+                item_sid = str(item.get("security_id") or item.get("securityId") or item.get("scrip_code") or item.get("scripCode") or "")
+                if item_sid == sid and item.get("market_depth"):
                     return item
+
+    # Nested single-security wrappers.
+    for container_key in ("data", "result", "quote"):
+        nested = data.get(container_key)
+        if isinstance(nested, dict) and nested.get("market_depth"):
+            return nested
 
     # For a single-security request, a one-item mapping may omit the code key.
     values = [v for v in data.values() if isinstance(v, dict)]
