@@ -19,6 +19,12 @@ def test_extract_depth_nfo_key():
     assert result.get("market_depth", {}).get("depth")
 
 
+def test_extract_depth_raw_provider_wrapper():
+    raw = {"status": "success", "data": sample_depth()}
+    result = extract_market_depth(raw, "47273")
+    assert result.get("market_depth", {}).get("depth")
+
+
 def test_extract_depth_direct_payload():
     direct = sample_depth()["NFO_47273"]
     result = extract_market_depth(direct, "47273")
