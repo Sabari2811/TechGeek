@@ -1,9 +1,9 @@
 import math
 from statistics import pstdev
-from datetime import datetime
+from datetime import datetime, time
 from zoneinfo import ZoneInfo
+from .config import CONFIG
 from .models import MarketState, OptionQuote, TradeSignal
-
 
 IST = ZoneInfo("Asia/Kolkata")
 
@@ -11,8 +11,9 @@ IST = ZoneInfo("Asia/Kolkata")
 class QuantEngine:
     """Deterministic mathematical signal engine.
 
-    No EMA, VWAP or LLM. Evidence is scored softly; only EV, execution quality
-    and risk controls are hard requirements at the orchestration layer.
+    Broker-supplied IV is used when available. Greeks are calculated locally
+    from IV/spot/strike/time-to-expiry when the broker does not provide them.
+    No EMA, VWAP or LLM is used in the hot path.
     """
 
     @staticmethod
@@ -20,7 +21,13 @@ class QuantEngine:
         return [math.log(b / a) for a, b in zip(prices, prices[1:]) if a > 0 and b > 0]
 
     @classmethod
-    def realized_vol(cls, prices: list[float], periods_per_year: int = 252 * 6 * 60) -> float:
+    def realized_vol(cls, prices: list[float], periods_per_year: int = 252 * 375) -> float:
+        """Annualized RV from one-minute-equivalent observations.
+
+        The live loop intentionally waits for enough changing observations
+        before displaying RV. This remains a research baseline until the
+        provider's native bar/tick history is used for production calibration.
+        """
         r = cls.returns(prices[-240:])
         if len(r) < 20:
             return 0.0
@@ -29,6 +36,10 @@ class QuantEngine:
     @staticmethod
     def normal_cdf(x: float) -> float:
         return 0.5 * (1.0 + math.erf(x / math.sqrt(2.0)))
+
+    @staticmethod
+    def normal_pdf(x: float) -> float:
+        return math.exp(-0.5 * x * x) / math.sqrt(2.0 * math.pi)
 
     @classmethod
     def probability_above(cls, spot: float, level: float, vol: float, minutes: float) -> float:
@@ -44,6 +55,78 @@ class QuantEngine:
     @staticmethod
     def intrinsic(spot: float, strike: float, option_type: str) -> float:
         return max(0.0, spot - strike) if option_type == "CE" else max(0.0, strike - spot)
+
+    @staticmethod
+    def time_to_expiry(expiry: str, now: datetime | None = None) -> float:
+        """Return years to the 15:30 IST expiry settlement window."""
+        if not expiry:
+            return 0.0
+        try:
+            d = datetime.strptime(expiry, "%Y-%m-%d").date()
+        except ValueError:
+            return 0.0
+        now = now or datetime.now(IST)
+        expiry_dt = datetime.combine(d, time(15, 30), tzinfo=IST)
+        seconds = max(60.0, (expiry_dt - now).total_seconds())
+        return seconds / (365.0 * 24.0 * 60.0 * 60.0)
+
+    @classmethod
+    def black_scholes_greeks(cls, spot: float, strike: float, iv: float,
+                             option_type: str, expiry: str,
+                             risk_free_rate: float | None = None,
+                             dividend_yield: float | None = None) -> dict[str, float]:
+        """Calculate Black-Scholes Greeks from broker IV when broker Greeks are absent.
+
+        Returns delta, gamma, theta (per calendar day) and vega (per 1 IV point).
+        These are model Greeks, not broker-provided values.
+        """
+        sigma = iv / 100.0 if iv > 1.0 else iv
+        t = cls.time_to_expiry(expiry)
+        if spot <= 0 or strike <= 0 or sigma <= 0 or t <= 0:
+            return {"delta": 0.0, "gamma": 0.0, "theta": 0.0, "vega": 0.0}
+
+        r = CONFIG.risk_free_rate if risk_free_rate is None else risk_free_rate
+        q = CONFIG.dividend_yield if dividend_yield is None else dividend_yield
+        sqrt_t = math.sqrt(t)
+        d1 = (math.log(spot / strike) + (r - q + 0.5 * sigma * sigma) * t) / (sigma * sqrt_t)
+        d2 = d1 - sigma * sqrt_t
+        nd1 = cls.normal_pdf(d1)
+        disc_q = math.exp(-q * t)
+        disc_r = math.exp(-r * t)
+        is_call = option_type.upper() == "CE"
+
+        if is_call:
+            delta = disc_q * cls.normal_cdf(d1)
+            theta_year = (
+                -spot * disc_q * nd1 * sigma / (2.0 * sqrt_t)
+                - r * strike * disc_r * cls.normal_cdf(d2)
+                + q * spot * disc_q * cls.normal_cdf(d1)
+            )
+        else:
+            delta = disc_q * (cls.normal_cdf(d1) - 1.0)
+            theta_year = (
+                -spot * disc_q * nd1 * sigma / (2.0 * sqrt_t)
+                + r * strike * disc_r * cls.normal_cdf(-d2)
+                - q * spot * disc_q * cls.normal_cdf(-d1)
+            )
+
+        gamma = disc_q * nd1 / (spot * sigma * sqrt_t)
+        vega = spot * disc_q * nd1 * sqrt_t / 100.0
+        theta = theta_year / 365.0
+        return {"delta": delta, "gamma": gamma, "theta": theta, "vega": vega}
+
+    @classmethod
+    def ensure_greeks(cls, state: MarketState, q: OptionQuote) -> None:
+        """Fill missing broker Greeks using a local model; never overwrite supplied values."""
+        if q.iv <= 0 or state.spot <= 0 or not state.expiry:
+            return
+        if abs(q.delta) > 0 or abs(q.gamma) > 0 or abs(q.theta) > 0 or abs(q.vega) > 0:
+            return
+        greeks = cls.black_scholes_greeks(state.spot, q.strike, q.iv, q.option_type, state.expiry)
+        q.delta = greeks["delta"]
+        q.gamma = greeks["gamma"]
+        q.theta = greeks["theta"]
+        q.vega = greeks["vega"]
 
     @classmethod
     def fair_value_proxy(cls, state: MarketState, q: OptionQuote) -> float:
@@ -93,6 +176,7 @@ class QuantEngine:
         if q.ltp <= 0 or q.bid <= 0 or q.ask <= 0 or q.spread_pct > 0.04:
             return None
 
+        cls.ensure_greeks(state, q)
         fair = cls.fair_value_proxy(state, q)
         rv = cls.realized_vol(state.spot_history)
         iv = q.iv / 100.0 if q.iv > 1 else q.iv
