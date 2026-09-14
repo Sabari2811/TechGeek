@@ -1,10 +1,16 @@
 import math
-from statistics import mean, pstdev
+from statistics import pstdev
 from datetime import datetime, timezone
 from .models import MarketState, OptionQuote, TradeSignal
 
+
 class QuantEngine:
-    """Deterministic first-pass quantitative engine. No LLM in the hot path."""
+    """Deterministic mathematical signal engine. No EMA, VWAP or LLM in the hot path.
+
+    The model intentionally uses a soft evidence score rather than making every
+    indicator a mandatory gate. Only EV, execution quality and risk controls are
+    hard requirements at the orchestration layer.
+    """
 
     @staticmethod
     def returns(prices: list[float]) -> list[float]:
@@ -38,29 +44,56 @@ class QuantEngine:
 
     @classmethod
     def fair_value_proxy(cls, state: MarketState, q: OptionQuote) -> float:
-        """Conservative proxy until full calibrated IV surface pricing is added."""
+        """Research baseline only; not a calibrated production option-pricing model."""
         rv = cls.realized_vol(state.spot_history)
         iv = q.iv / 100.0 if q.iv > 1 else q.iv
         vol = max(iv, rv, 0.05)
         distance = abs(state.spot - q.strike)
         time_factor = math.sqrt(30 / (252 * 375))
         time_value = state.spot * vol * time_factor * 0.40
-        return cls.intrinsic(state.spot, q.strike, q.option_type) + time_value * math.exp(-distance / max(state.spot * 0.02, 1))
+        return cls.intrinsic(state.spot, q.strike, q.option_type) + time_value * math.exp(
+            -distance / max(state.spot * 0.02, 1)
+        )
+
+    @staticmethod
+    def _score(mispricing: float, probability: float, iv: float, rv: float,
+               oi_change: float, oi: float, volume: float, delta: float) -> float:
+        """Soft evidence score. Components rank candidates; they are not gates."""
+        valuation = max(0.0, min(25.0, 12.5 + 25.0 * mispricing))
+        probability_score = max(0.0, min(20.0, 40.0 * (probability - 0.50)))
+
+        if rv > 0 and iv > 0:
+            ratio = iv / rv
+            volatility = max(0.0, 15.0 - abs(math.log(ratio)) * 8.0)
+        else:
+            volatility = 7.5
+
+        participation = min(15.0, abs(oi_change) / max(oi, 1.0) * 150.0)
+        volume_score = min(10.0, math.log1p(max(volume, 0.0)) / 10.0)
+        greek_score = min(15.0, abs(delta) * 15.0)
+        return valuation + probability_score + volatility + participation + volume_score + greek_score
 
     @classmethod
-    def evaluate(cls, state: MarketState, q: OptionQuote, risk_per_share: float, target_multiple: float = 1.8) -> TradeSignal | None:
+    def evaluate(cls, state: MarketState, q: OptionQuote, risk_per_share: float,
+                 target_multiple: float = 1.8) -> TradeSignal | None:
         if q.ltp <= 0 or q.bid <= 0 or q.ask <= 0 or q.spread_pct > 0.04:
             return None
+
         fair = cls.fair_value_proxy(state, q)
-        vol = max(cls.realized_vol(state.spot_history), q.iv / 100.0 if q.iv > 1 else q.iv, 0.05)
-        # Short-horizon directional probability based on spot-to-strike distance and volatility.
-        minutes = max(5.0, (15 * 60) - (datetime.now(timezone.utc).minute % 60))
-        p_touch = cls.probability_above(state.spot, q.strike, vol, minutes)
+        rv = cls.realized_vol(state.spot_history)
+        iv = q.iv / 100.0 if q.iv > 1 else q.iv
+        vol = max(rv, iv, 0.05)
+
+        # Use actual session minutes remaining instead of a UTC-minute modulo shortcut.
+        now = datetime.now(timezone.utc)
+        minutes = max(5.0, 15 * 60 - (now.hour * 60 + now.minute))
+        p_spot = cls.probability_above(state.spot, q.strike, vol, minutes)
         if q.option_type == "PE":
-            p_touch = 1.0 - p_touch
-        # Premium discount adds a modest valuation edge; cap to avoid overconfidence.
+            p_spot = 1.0 - p_spot
+
         mispricing = (fair - q.ltp) / q.ltp
-        probability = min(0.90, max(0.10, 0.50 + 0.20 * (p_touch - 0.50) + 0.20 * max(-0.5, min(0.5, mispricing))))
+        probability = min(0.90, max(0.10, 0.50 + 0.20 * (p_spot - 0.50) + 0.20 * max(-0.5, min(0.5, mispricing))))
+
         stop = max(q.ltp * 0.75, q.ltp - risk_per_share)
         target = q.ltp + (q.ltp - stop) * target_multiple
         win = max(0.0, target - q.ltp)
@@ -69,6 +102,19 @@ class QuantEngine:
         net_ev = ev - q.spread * 0.5 - q.ltp * 0.002
         if net_ev < 0:
             return None
+
+        score = cls._score(mispricing, probability, iv, rv, q.oi_change, q.oi, q.volume, q.delta)
+        checks = {
+            "Mathematical valuation": fair >= q.ltp,
+            "Probability edge": probability >= 0.55,
+            "IV / RV measured": iv > 0 and rv > 0,
+            "OI participation": abs(q.oi_change) > 0,
+            "Volume participation": q.volume > 0,
+            "Greeks available": abs(q.delta) > 0 or abs(q.gamma) > 0,
+            "Positive net EV": net_ev >= 0,
+            "Spread within limit": q.spread_pct <= 0.04,
+        }
+
         return TradeSignal(
             action="BUY",
             option_type=q.option_type,
@@ -83,7 +129,7 @@ class QuantEngine:
             fair_value=fair,
             expected_value=ev,
             net_expected_value=net_ev,
-            reason=f"prob={probability:.2%}, fair={fair:.2f}, netEV={net_ev:.2f}",
+            reason=f"score={score:.1f}/100, prob={probability:.2%}, fair={fair:.2f}, netEV={net_ev:.2f}",
         )
 
     @classmethod
@@ -96,4 +142,6 @@ class QuantEngine:
             s = cls.evaluate(state, q, risk_per_share)
             if s and s.net_expected_value >= min_net_ev:
                 candidates.append(s)
-        return max(candidates, key=lambda x: x.net_expected_value, default=None)
+
+        # EV is the primary objective. Score breaks ties; this avoids over-filtering.
+        return max(candidates, key=lambda x: (x.net_expected_value, x.reason), default=None)
