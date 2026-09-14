@@ -118,6 +118,10 @@ async def run():
                 raw_depth = extract_market_depth(depth_data, q.security_id)
                 micro = MicrostructureEngine.from_depth(q.security_id, raw_depth, micro_state)
                 confirmed, micro_reason = MicrostructureEngine.confirmation(micro)
+                if micro is None:
+                    # Preserve the existing user-facing WAIT semantics while exposing
+                    # enough provider/identifier context to diagnose the exact contract.
+                    micro_reason = f"microstructure unavailable (security_id={q.security_id})"
             except Exception as exc:
                 confirmed, micro_reason = False, f"depth feed unavailable: {exc}"
 
