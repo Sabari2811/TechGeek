@@ -9,10 +9,10 @@ IST = ZoneInfo("Asia/Kolkata")
 
 
 class QuantEngine:
-    """Deterministic mathematical signal engine. No EMA, VWAP or LLM in the hot path.
+    """Deterministic mathematical signal engine.
 
-    Evidence is scored softly so the engine does not require every variable to
-    agree. Hard entry controls remain EV, execution quality and risk.
+    No EMA, VWAP or LLM. Evidence is scored softly; only EV, execution quality
+    and risk controls are hard requirements at the orchestration layer.
     """
 
     @staticmethod
@@ -59,9 +59,8 @@ class QuantEngine:
         )
 
     @staticmethod
-    def _score(mispricing: float, probability: float, iv: float, rv: float,
-               oi_change: float, oi: float, volume: float, delta: float) -> float:
-        """Soft evidence score. Components rank candidates; they are not gates."""
+    def _score_components(mispricing: float, probability: float, iv: float, rv: float,
+                          oi_change: float, oi: float, volume: float, delta: float) -> dict[str, float]:
         valuation = max(0.0, min(25.0, 12.5 + 25.0 * mispricing))
         probability_score = max(0.0, min(20.0, 40.0 * (probability - 0.50)))
         if rv > 0 and iv > 0:
@@ -72,11 +71,25 @@ class QuantEngine:
         participation = min(15.0, abs(oi_change) / max(oi, 1.0) * 150.0)
         volume_score = min(10.0, math.log1p(max(volume, 0.0)) / 10.0)
         greek_score = min(15.0, abs(delta) * 15.0)
-        return valuation + probability_score + volatility + participation + volume_score + greek_score
+        return {
+            "valuation": valuation,
+            "probability": probability_score,
+            "volatility": volatility,
+            "participation": participation,
+            "volume": volume_score,
+            "greeks": greek_score,
+        }
+
+    @classmethod
+    def _score(cls, components: dict[str, float], learner=None) -> float:
+        weighted = sum(value * (learner.weight(name) if learner else 1.0)
+                       for name, value in components.items())
+        weight_sum = sum((learner.weight(name) if learner else 1.0) for name in components) or 1.0
+        return weighted / weight_sum * 6.0
 
     @classmethod
     def evaluate(cls, state: MarketState, q: OptionQuote, risk_per_share: float,
-                 target_multiple: float = 1.8) -> TradeSignal | None:
+                 target_multiple: float = 1.8, learner=None) -> TradeSignal | None:
         if q.ltp <= 0 or q.bid <= 0 or q.ask <= 0 or q.spread_pct > 0.04:
             return None
 
@@ -85,7 +98,6 @@ class QuantEngine:
         iv = q.iv / 100.0 if q.iv > 1 else q.iv
         vol = max(rv, iv, 0.05)
 
-        # Actual remaining time in the user's trading session (IST).
         now = datetime.now(IST)
         session_start = now.replace(hour=9, minute=30, second=0, microsecond=0)
         session_end = now.replace(hour=15, minute=15, second=0, microsecond=0)
@@ -99,7 +111,10 @@ class QuantEngine:
             p_spot = 1.0 - p_spot
 
         mispricing = (fair - q.ltp) / q.ltp
-        probability = min(0.90, max(0.10, 0.50 + 0.20 * (p_spot - 0.50) + 0.20 * max(-0.5, min(0.5, mispricing))))
+        probability = min(0.90, max(0.10, 0.50 + 0.20 * (p_spot - 0.50) +
+                                    0.20 * max(-0.5, min(0.5, mispricing))))
+        if learner:
+            probability = learner.probability(probability)
 
         stop = max(q.ltp * 0.75, q.ltp - risk_per_share)
         target = q.ltp + (q.ltp - stop) * target_multiple
@@ -110,7 +125,8 @@ class QuantEngine:
         if net_ev < 0:
             return None
 
-        score = cls._score(mispricing, probability, iv, rv, q.oi_change, q.oi, q.volume, q.delta)
+        components = cls._score_components(mispricing, probability, iv, rv, q.oi_change, q.oi, q.volume, q.delta)
+        score = cls._score(components, learner)
         checks = {
             "Mathematical valuation": fair >= q.ltp,
             "Probability evidence": probability >= 0.55,
@@ -121,25 +137,23 @@ class QuantEngine:
             "Positive net EV": net_ev >= 0,
             "Spread within limit": q.spread_pct <= 0.04,
         }
-        signal = TradeSignal(
+        return TradeSignal(
             action="BUY", option_type=q.option_type, strike=q.strike,
             security_id=q.security_id, symbol=q.symbol, entry=q.ask,
             stop=stop, target=target, quantity=0, probability=probability,
             fair_value=fair, expected_value=ev, net_expected_value=net_ev,
             reason=f"score={score:.1f}/100, prob={probability:.2%}, fair={fair:.2f}, netEV={net_ev:.2f}",
+            score=score, checks=checks, score_components=components,
         )
-        signal.score = score
-        signal.checks = checks
-        return signal
 
     @classmethod
-    def best_signal(cls, state: MarketState, min_net_ev: float) -> TradeSignal | None:
+    def best_signal(cls, state: MarketState, min_net_ev: float, learner=None) -> TradeSignal | None:
         candidates = []
         risk_per_share = max(5.0, state.spot * 0.001)
         for q in state.options.values():
             if q.option_type not in {"CE", "PE"}:
                 continue
-            s = cls.evaluate(state, q, risk_per_share)
+            s = cls.evaluate(state, q, risk_per_share, learner=learner)
             if s and s.net_expected_value >= min_net_ev:
                 candidates.append(s)
-        return max(candidates, key=lambda x: (x.net_expected_value, getattr(x, "score", 0.0)), default=None)
+        return max(candidates, key=lambda x: (x.net_expected_value, x.score), default=None)
