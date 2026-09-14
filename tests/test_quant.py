@@ -35,8 +35,8 @@ def test_market_phase_detects_accumulation():
 
 def test_market_phase_detects_early_confirmation():
     state = MarketState(spot=100.0)
-    state.spot_history = [100.0, 99.9, 100.1, 100.0, 100.05, 100.08,
-                          100.02, 100.10, 100.15, 100.18, 100.19, 100.20]
+    state.spot_history = [99.5, 99.7, 99.8, 99.75, 99.85, 99.9,
+                          99.95, 100.0, 100.05, 100.10, 100.15, 100.20]
     phase, direction, confidence = QuantEngine.market_phase(state)
     assert phase == "EARLY_CONFIRMATION"
     assert direction == "BULLISH"
