@@ -10,7 +10,7 @@ The live hot path does **not** use EMA, VWAP, moving-average signals, a browser,
 
 The design deliberately avoids turning every metric into a mandatory gate. Mathematical variables contribute evidence to a composite score; only core safety conditions such as minimum net EV, execution quality, risk limits, anomaly protection and session rules can block an otherwise valid candidate.
 
-The INDstocks API provides a live NIFTY option-chain endpoint with LTP, OI, volume, top-of-book bid/ask, IV and Greeks. It also provides five-level market depth through the market-depth quote endpoint and WebSocket streams for market data and order updates. The implementation uses the option-chain REST endpoint for stable snapshots and five-level depth as a secondary execution-quality confirmation layer.
+The INDstocks API provides a live NIFTY option-chain endpoint with LTP, OI, volume, top-of-book bid/ask and IV. Five-level market depth is used as a secondary execution-quality confirmation layer. Broker Greeks may be absent for a contract; when absent, QuantNifty calculates model Greeks locally from spot, strike, IV and time-to-expiry.
 
 ## Quantitative core
 
@@ -22,7 +22,7 @@ The INDstocks API provides a live NIFTY option-chain endpoint with LTP, OI, volu
 - expected payoff / expected value / net EV
 - soft mathematical evidence score
 - OI and volume participation
-- option Greeks
+- model option Greeks: Delta, Gamma, Theta and Vega
 - bid/ask spread and liquidity
 - five-level order-book imbalance
 - liquidity depletion / sweep proxy
@@ -142,4 +142,4 @@ A stop price is not a guaranteed maximum loss during gaps or illiquidity. This i
 
 ## Important
 
-This software is an engineering/research system, not a promise of profitability. The current fair-value component is a conservative research baseline, not a calibrated production option-pricing model. Microstructure signals are inference from public market-depth snapshots, not proof of institutional activity. Every quantitative rule must be validated out of sample with realistic fees and slippage before live use.
+This software is an engineering/research system, not a promise of profitability. The current fair-value component is a conservative research baseline, not a calibrated production option-pricing model. Model Greeks are estimates and should not be treated as broker/exchange Greeks. Microstructure signals are inference from public market-depth snapshots, not proof of institutional activity. Every quantitative rule must be validated out of sample with realistic fees and slippage before live use.
