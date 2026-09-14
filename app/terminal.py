@@ -1,14 +1,14 @@
 from datetime import datetime
 from zoneinfo import ZoneInfo
 from .config import CONFIG
-from .models import Position, TradeSignal
+from .models import Position
 
 
 IST = ZoneInfo("Asia/Kolkata")
 
 
 class Terminal:
-    """Single-screen terminal UI. Never appends a market-data log stream."""
+    """Single-screen terminal UI. Market data never becomes a scrolling log."""
 
     @staticmethod
     def clear():
@@ -26,7 +26,7 @@ class Terminal:
         print("╔══════════════════════════════════════════════════════╗")
         print(f"║              QUANTNIFTY | {mode:<12}             ║")
         print("╠══════════════════════════════════════════════════════╣")
-        print(f"║ TIME     {now} IST     NIFTY     {spot:,.2f}" if spot else f"║ TIME     {now} IST     NIFTY     --")
+        print(f"║ TIME     {now} IST     NIFTY     {spot:,.2f}          ║" if spot else f"║ TIME     {now} IST     NIFTY     --               ║")
         print("╚══════════════════════════════════════════════════════╝")
 
     @staticmethod
@@ -40,13 +40,13 @@ class Terminal:
             for label, passed in checks.items():
                 print(Terminal._check(label, passed))
         else:
-            print(Terminal._check("Risk / session", CONFIG.session_active()))
+            print(Terminal._check("Session / risk", CONFIG.session_active()))
             print(Terminal._check("Mathematical edge", False))
-        print("\nNo order. Waiting for the next valid mathematical edge.")
+        print("\nNo order. Waiting for the next mathematical edge.")
 
     @staticmethod
-    def active(position: Position):
-        Terminal._header()
+    def active(position: Position, spot: float = 0.0):
+        Terminal._header(spot)
         s = position.signal
         pnl = position.unrealized_pnl
         base = position.entry_price * position.quantity
@@ -67,18 +67,12 @@ class Terminal:
 
         print("\nCHECKLIST")
         checks = getattr(s, "checks", {})
-        if checks:
-            for label, passed in checks.items():
-                print(Terminal._check(label, passed))
-        else:
-            print(Terminal._check("Positive net EV", s.net_expected_value > 0))
-            print(Terminal._check("Risk controlled", True))
+        for label, passed in checks.items():
+            print(Terminal._check(label, passed))
 
     @staticmethod
-    def closed(position: Position):
-        # Keep the same single-screen philosophy: show the completed trade briefly,
-        # then the next loop replaces it with the waiting screen.
-        Terminal._header()
+    def closed(position: Position, spot: float = 0.0):
+        Terminal._header(spot)
         s = position.signal
         pnl = position.realized_pnl
         print("\nSIGNAL")
