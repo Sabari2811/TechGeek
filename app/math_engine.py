@@ -9,11 +9,11 @@ IST = ZoneInfo("Asia/Kolkata")
 
 
 class QuantEngine:
-    """Deterministic mathematical signal engine.
+    """Deterministic quantitative signal engine.
 
-    Broker-supplied IV is used when available. Greeks are calculated locally
-    from IV/spot/strike/time-to-expiry when the broker does not provide them.
-    No EMA, VWAP or LLM is used in the hot path.
+    VWAP/EMA-style indicators are context only; they are not used as a
+    mechanical entry trigger. The engine instead looks for a compressed,
+    directionally developing market and then seeks early confirmation.
     """
 
     @staticmethod
@@ -22,12 +22,6 @@ class QuantEngine:
 
     @classmethod
     def realized_vol(cls, prices: list[float], periods_per_year: int = 252 * 375) -> float:
-        """Annualized RV from one-minute-equivalent observations.
-
-        The live loop intentionally waits for enough changing observations
-        before displaying RV. This remains a research baseline until the
-        provider's native bar/tick history is used for production calibration.
-        """
         r = cls.returns(prices[-240:])
         if len(r) < 20:
             return 0.0
@@ -58,7 +52,6 @@ class QuantEngine:
 
     @staticmethod
     def time_to_expiry(expiry: str, now: datetime | None = None) -> float:
-        """Return years to the 15:30 IST expiry settlement window."""
         if not expiry:
             return 0.0
         try:
@@ -75,11 +68,6 @@ class QuantEngine:
                              option_type: str, expiry: str,
                              risk_free_rate: float | None = None,
                              dividend_yield: float | None = None) -> dict[str, float]:
-        """Calculate Black-Scholes Greeks from broker IV when broker Greeks are absent.
-
-        Returns delta, gamma, theta (per calendar day) and vega (per 1 IV point).
-        These are model Greeks, not broker-provided values.
-        """
         sigma = iv / 100.0 if iv > 1.0 else iv
         t = cls.time_to_expiry(expiry)
         if spot <= 0 or strike <= 0 or sigma <= 0 or t <= 0:
@@ -97,18 +85,14 @@ class QuantEngine:
 
         if is_call:
             delta = disc_q * cls.normal_cdf(d1)
-            theta_year = (
-                -spot * disc_q * nd1 * sigma / (2.0 * sqrt_t)
-                - r * strike * disc_r * cls.normal_cdf(d2)
-                + q * spot * disc_q * cls.normal_cdf(d1)
-            )
+            theta_year = (-spot * disc_q * nd1 * sigma / (2.0 * sqrt_t)
+                          - r * strike * disc_r * cls.normal_cdf(d2)
+                          + q * spot * disc_q * cls.normal_cdf(d1))
         else:
             delta = disc_q * (cls.normal_cdf(d1) - 1.0)
-            theta_year = (
-                -spot * disc_q * nd1 * sigma / (2.0 * sqrt_t)
-                + r * strike * disc_r * cls.normal_cdf(-d2)
-                - q * spot * disc_q * cls.normal_cdf(-d1)
-            )
+            theta_year = (-spot * disc_q * nd1 * sigma / (2.0 * sqrt_t)
+                          + r * strike * disc_r * cls.normal_cdf(-d2)
+                          - q * spot * disc_q * cls.normal_cdf(-d1))
 
         gamma = disc_q * nd1 / (spot * sigma * sqrt_t)
         vega = spot * disc_q * nd1 * sqrt_t / 100.0
@@ -117,7 +101,6 @@ class QuantEngine:
 
     @classmethod
     def ensure_greeks(cls, state: MarketState, q: OptionQuote) -> None:
-        """Fill missing broker Greeks using a local model; never overwrite supplied values."""
         if q.iv <= 0 or state.spot <= 0 or not state.expiry:
             return
         if abs(q.delta) > 0 or abs(q.gamma) > 0 or abs(q.theta) > 0 or abs(q.vega) > 0:
@@ -130,7 +113,6 @@ class QuantEngine:
 
     @classmethod
     def fair_value_proxy(cls, state: MarketState, q: OptionQuote) -> float:
-        """Research baseline only; not a calibrated production option-pricing model."""
         rv = cls.realized_vol(state.spot_history)
         iv = q.iv / 100.0 if q.iv > 1 else q.iv
         vol = max(iv, rv, 0.05)
@@ -154,14 +136,8 @@ class QuantEngine:
         participation = min(15.0, abs(oi_change) / max(oi, 1.0) * 150.0)
         volume_score = min(10.0, math.log1p(max(volume, 0.0)) / 10.0)
         greek_score = min(15.0, abs(delta) * 15.0)
-        return {
-            "valuation": valuation,
-            "probability": probability_score,
-            "volatility": volatility,
-            "participation": participation,
-            "volume": volume_score,
-            "greeks": greek_score,
-        }
+        return {"valuation": valuation, "probability": probability_score, "volatility": volatility,
+                "participation": participation, "volume": volume_score, "greeks": greek_score}
 
     @classmethod
     def _score(cls, components: dict[str, float], learner=None) -> float:
@@ -170,6 +146,50 @@ class QuantEngine:
         weight_sum = sum((learner.weight(name) if learner else 1.0) for name in components) or 1.0
         return weighted / weight_sum * 6.0
 
+    @staticmethod
+    def _unique_prices(prices: list[float]) -> list[float]:
+        out = []
+        for price in prices:
+            if price > 0 and (not out or price != out[-1]):
+                out.append(price)
+        return out
+
+    @classmethod
+    def market_phase(cls, state: MarketState) -> tuple[str, str, float]:
+        """Classify the spot market without requiring a completed breakout.
+
+        Returns (phase, direction, confidence). Thresholds are deliberately
+        modest so the engine can flag early development rather than waiting for
+        a large move. Accumulation is a watch state; only early confirmation or
+        a still-acceptable breakout can become an entry candidate.
+        """
+        prices = cls._unique_prices(state.spot_history)[-60:]
+        if len(prices) < 12:
+            return "INSUFFICIENT_DATA", "NEUTRAL", 0.0
+
+        recent = prices[-12:]
+        fast = prices[-5:]
+        base = max(recent[0], 1e-9)
+        range_pct = (max(recent) - min(recent)) / base
+        net_recent = (recent[-1] - recent[0]) / base
+        net_fast = (fast[-1] - fast[0]) / max(fast[0], 1e-9)
+        direction = "BULLISH" if net_recent > 0.00025 else "BEARISH" if net_recent < -0.00025 else "NEUTRAL"
+
+        if range_pct <= 0.0035 and abs(net_recent) <= 0.0020:
+            confidence = min(0.95, 0.55 + max(0.0, 0.0035 - range_pct) * 60.0)
+            return "ACCUMULATION", direction, confidence
+
+        if abs(net_fast) >= 0.0025:
+            confidence = min(0.98, 0.65 + abs(net_fast) * 60.0)
+            phase = "BREAKOUT" if abs(net_fast) < 0.005 else "EXTENDED"
+            return phase, ("BULLISH" if net_fast > 0 else "BEARISH"), confidence
+
+        if abs(net_fast) >= 0.0012 and direction != "NEUTRAL":
+            confidence = min(0.95, 0.60 + abs(net_fast) * 80.0)
+            return "EARLY_CONFIRMATION", ("BULLISH" if net_fast > 0 else "BEARISH"), confidence
+
+        return "TRANSITION", direction, 0.50
+
     @classmethod
     def evaluate(cls, state: MarketState, q: OptionQuote, risk_per_share: float,
                  target_multiple: float = 1.8, learner=None) -> TradeSignal | None:
@@ -177,6 +197,7 @@ class QuantEngine:
             return None
 
         cls.ensure_greeks(state, q)
+        phase, direction, phase_confidence = cls.market_phase(state)
         fair = cls.fair_value_proxy(state, q)
         rv = cls.realized_vol(state.spot_history)
         iv = q.iv / 100.0 if q.iv > 1 else q.iv
@@ -185,14 +206,18 @@ class QuantEngine:
         now = datetime.now(IST)
         session_start = now.replace(hour=9, minute=30, second=0, microsecond=0)
         session_end = now.replace(hour=15, minute=15, second=0, microsecond=0)
-        if now < session_start:
-            minutes = 345.0
-        else:
-            minutes = max(5.0, (session_end - now).total_seconds() / 60.0)
+        minutes = 345.0 if now < session_start else max(5.0, (session_end - now).total_seconds() / 60.0)
 
         p_spot = cls.probability_above(state.spot, q.strike, vol, minutes)
         if q.option_type == "PE":
             p_spot = 1.0 - p_spot
+
+        # Early-development evidence nudges probability only when direction agrees;
+        # it never creates a signal by itself.
+        if direction == ("BULLISH" if q.option_type == "CE" else "BEARISH"):
+            p_spot += 0.05 * phase_confidence
+        elif direction != "NEUTRAL":
+            p_spot -= 0.05 * phase_confidence
 
         mispricing = (fair - q.ltp) / q.ltp
         probability = min(0.90, max(0.10, 0.50 + 0.20 * (p_spot - 0.50) +
@@ -220,14 +245,27 @@ class QuantEngine:
             "Greeks available": abs(q.delta) > 0 or abs(q.gamma) > 0,
             "Positive net EV": net_ev >= 0,
             "Spread within limit": q.spread_pct <= 0.04,
+            "Pre-breakout / early phase": phase in {"ACCUMULATION", "EARLY_CONFIRMATION", "BREAKOUT"},
+            "Direction aligned": direction == "NEUTRAL" or direction == ("BULLISH" if q.option_type == "CE" else "BEARISH"),
         }
+        # Accumulation alone is never an entry. Early confirmation is the preferred
+        # entry phase; breakout is allowed only if the mathematical edge remains.
+        if phase not in {"EARLY_CONFIRMATION", "BREAKOUT"}:
+            return None
+        if direction not in {"NEUTRAL", "BULLISH" if q.option_type == "CE" else "BEARISH"}:
+            return None
+        if probability < 0.55:
+            return None
+
         return TradeSignal(
             action="BUY", option_type=q.option_type, strike=q.strike,
             security_id=q.security_id, symbol=q.symbol, entry=q.ask,
             stop=stop, target=target, quantity=0, probability=probability,
             fair_value=fair, expected_value=ev, net_expected_value=net_ev,
-            reason=f"score={score:.1f}/100, prob={probability:.2%}, fair={fair:.2f}, netEV={net_ev:.2f}",
+            reason=f"phase={phase}, direction={direction}, phase_conf={phase_confidence:.2f}, "
+                   f"score={score:.1f}/100, prob={probability:.2%}, fair={fair:.2f}, netEV={net_ev:.2f}",
             score=score, checks=checks, score_components=components,
+            market_phase=phase, direction_bias=direction,
         )
 
     @classmethod
