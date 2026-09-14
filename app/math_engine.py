@@ -1,7 +1,11 @@
 import math
 from statistics import pstdev
-from datetime import datetime, timezone
+from datetime import datetime
+from zoneinfo import ZoneInfo
 from .models import MarketState, OptionQuote, TradeSignal
+
+
+IST = ZoneInfo("Asia/Kolkata")
 
 
 class QuantEngine:
@@ -81,10 +85,15 @@ class QuantEngine:
         iv = q.iv / 100.0 if q.iv > 1 else q.iv
         vol = max(rv, iv, 0.05)
 
-        # Estimate remaining session time without the previous UTC-minute shortcut.
-        now = datetime.now(timezone.utc)
-        session_minutes = now.hour * 60 + now.minute
-        minutes = max(5.0, 15 * 60 - session_minutes)
+        # Actual remaining time in the user's trading session (IST).
+        now = datetime.now(IST)
+        session_start = now.replace(hour=9, minute=30, second=0, microsecond=0)
+        session_end = now.replace(hour=15, minute=15, second=0, microsecond=0)
+        if now < session_start:
+            minutes = 345.0
+        else:
+            minutes = max(5.0, (session_end - now).total_seconds() / 60.0)
+
         p_spot = cls.probability_above(state.spot, q.strike, vol, minutes)
         if q.option_type == "PE":
             p_spot = 1.0 - p_spot
@@ -119,7 +128,6 @@ class QuantEngine:
             fair_value=fair, expected_value=ev, net_expected_value=net_ev,
             reason=f"score={score:.1f}/100, prob={probability:.2%}, fair={fair:.2f}, netEV={net_ev:.2f}",
         )
-        # Runtime metadata keeps the core dataclass backward-compatible.
         signal.score = score
         signal.checks = checks
         return signal
@@ -134,5 +142,4 @@ class QuantEngine:
             s = cls.evaluate(state, q, risk_per_share)
             if s and s.net_expected_value >= min_net_ev:
                 candidates.append(s)
-        # EV is primary; score is a tie-breaker. This prevents over-filtering.
         return max(candidates, key=lambda x: (x.net_expected_value, getattr(x, "score", 0.0)), default=None)
