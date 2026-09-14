@@ -2,6 +2,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Dict, Optional
 
+
 @dataclass
 class OptionQuote:
     strike: float
@@ -33,6 +34,7 @@ class OptionQuote:
     def spread_pct(self) -> float:
         return self.spread / self.ltp if self.ltp > 0 else 1.0
 
+
 @dataclass
 class MarketState:
     timestamp: Optional[datetime] = None
@@ -58,6 +60,7 @@ class MarketState:
     def get_option(self, strike: float, option_type: str) -> Optional[OptionQuote]:
         return self.options.get(self.key(strike, option_type))
 
+
 @dataclass
 class TradeSignal:
     action: str
@@ -74,6 +77,10 @@ class TradeSignal:
     expected_value: float
     net_expected_value: float
     reason: str
+    score: float = 0.0
+    checks: Dict[str, bool] = field(default_factory=dict)
+    score_components: Dict[str, float] = field(default_factory=dict)
+
 
 @dataclass
 class Position:
