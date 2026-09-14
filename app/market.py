@@ -26,7 +26,7 @@ class IndstocksClient:
         return payload["data"]
 
     async def market_depth(self, security_ids: list[str]) -> dict:
-        """Return usable provider depth, falling back to full quotes when needed."""
+        """Return usable provider depth; primary endpoint then full-quote fallback."""
         codes = [f"NFO_{sid}" for sid in security_ids if sid]
         if not codes:
             return {}
@@ -40,15 +40,12 @@ class IndstocksClient:
         if extract_market_depth(payload, str(security_ids[0])):
             return payload
 
-        # INDstocks full quotes can also contain market_depth. Use it only when
-        # the dedicated depth endpoint succeeds but has no usable depth object.
         full = await self.market_quote_fallback(security_ids)
         if extract_market_depth(full, str(security_ids[0])):
             return full
-        return payload
+        return full if isinstance(full, dict) else payload
 
     async def market_quote_fallback(self, security_ids: list[str]) -> dict:
-        """Try full quote endpoint, which may also expose market_depth."""
         codes = [f"NFO_{sid}" for sid in security_ids if sid]
         if not codes:
             return {}
@@ -151,7 +148,6 @@ def extract_market_depth(data: dict, security_id: str) -> dict:
 
 
 def summarize_market_depth_payload(data: dict, security_id: str) -> str:
-    """Return a short safe diagnostic summary without exposing sensitive headers/tokens."""
     sid = str(security_id)
     if not isinstance(data, dict):
         return f"response_type={type(data).__name__}"
