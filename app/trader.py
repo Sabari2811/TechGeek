@@ -8,30 +8,35 @@ from .risk import RiskManager
 from .execution import ExecutionEngine
 from .terminal import Terminal
 
+
 async def next_expiry(client: IndstocksClient) -> str:
-    r = await client.http.get("/market/instruments/expiries", params={"underlying":"NIFTY", "segment":"DERIVATIVE"})
+    r = await client.http.get("/market/instruments/expiries", params={"underlying": "NIFTY", "segment": "DERIVATIVE"})
     r.raise_for_status()
     data = r.json().get("data", [])
     if not data:
         raise RuntimeError("No upcoming NIFTY expiry returned")
     return data[0]
 
+
 async def run():
     if not CONFIG.access_token:
         Terminal.waiting(reason="INDSTOCKS_ACCESS_TOKEN is missing. Configure .env first.")
         return
+
     client = IndstocksClient()
     state = MarketState()
     micro_state = MicrostructureState()
     risk = RiskManager()
     execution = ExecutionEngine(client)
     expiry = None
+
     try:
         while True:
             if not CONFIG.session_active():
                 Terminal.waiting(state.spot, "Outside market session. Run during 09:30–15:15 IST.")
                 await asyncio.sleep(30)
                 continue
+
             try:
                 if expiry is None:
                     expiry = await next_expiry(client)
@@ -50,55 +55,78 @@ async def run():
                     if q.ltp <= p.signal.stop:
                         closed = await execution.exit(q.bid or q.ltp, "STOP LOSS")
                         risk.record_trade(closed.realized_pnl)
-                        Terminal.closed(closed)
+                        Terminal.closed(closed, state.spot)
                         await asyncio.sleep(1)
                         continue
                     if q.ltp >= p.signal.target:
                         closed = await execution.exit(q.bid or q.ltp, "TARGET")
                         risk.record_trade(closed.realized_pnl)
-                        Terminal.closed(closed)
+                        Terminal.closed(closed, state.spot)
                         await asyncio.sleep(1)
                         continue
+
                 if not CONFIG.entries_allowed():
                     price = q.bid if q and q.bid > 0 else (q.ltp if q else p.current_price)
                     closed = await execution.exit(price, "SESSION SQUARE-OFF")
                     risk.record_trade(closed.realized_pnl)
-                    Terminal.closed(closed)
+                    Terminal.closed(closed, state.spot)
                     await asyncio.sleep(1)
                     continue
-                Terminal.active(p)
+
+                Terminal.active(p, state.spot)
                 await asyncio.sleep(CONFIG.poll_seconds)
                 continue
 
             allowed, reason = risk.check_market(state)
             if not allowed:
-                Terminal.waiting(state.spot, f"NO TRADE YET — {reason}")
+                Terminal.waiting(
+                    state.spot,
+                    f"NO TRADE — {reason}",
+                    {"Session / risk": False, "Mathematical edge": False},
+                )
                 await asyncio.sleep(CONFIG.poll_seconds)
                 continue
 
             signal = QuantEngine.best_signal(state, CONFIG.min_net_ev)
             if not signal:
-                Terminal.waiting(state.spot)
-                await asyncio.sleep(CONFIG.poll_seconds)
-                continue
-            q = state.get_option(signal.strike, signal.option_type)
-            if not q or q.ask <= 0 or q.spread_pct > CONFIG.max_spread_pct:
-                Terminal.waiting(state.spot, "Candidate rejected by liquidity guard")
+                Terminal.waiting(
+                    state.spot,
+                    "No candidate meets the minimum mathematical EV.",
+                    {"Session / risk": True, "Minimum net EV": False},
+                )
                 await asyncio.sleep(CONFIG.poll_seconds)
                 continue
 
-            # Five-level depth is a secondary confirmation layer. It can reject a
-            # mathematically attractive trade when the live book is thin or strongly
-            # absorbed. A sweep is a bonus signal, never a standalone entry rule.
+            q = state.get_option(signal.strike, signal.option_type)
+            if not q or q.ask <= 0 or q.spread_pct > CONFIG.max_spread_pct:
+                Terminal.waiting(
+                    state.spot,
+                    "Candidate rejected by execution-quality guard.",
+                    {**getattr(signal, "checks", {}), "Liquidity / spread": False},
+                )
+                await asyncio.sleep(CONFIG.poll_seconds)
+                continue
+
             try:
                 depth = await client.market_depth([q.security_id])
                 raw_depth = depth.get(f"NFO_{q.security_id}") or depth.get(q.security_id)
                 micro = MicrostructureEngine.from_depth(q.security_id, raw_depth or {}, micro_state)
                 confirmed, micro_reason = MicrostructureEngine.confirmation(micro)
             except Exception as exc:
+                micro = None
                 confirmed, micro_reason = False, f"depth feed unavailable: {exc}"
+
+            # Microstructure is an execution-quality safety layer, not a standalone
+            # directional trigger. It can reject a trade but does not need to predict it.
             if not confirmed:
-                Terminal.waiting(state.spot, f"Candidate rejected by microstructure — {micro_reason}")
+                checks = dict(getattr(signal, "checks", {}))
+                checks["Liquidity / spread"] = q.spread_pct <= CONFIG.max_spread_pct
+                checks["Microstructure confirmation"] = False
+                Terminal.waiting(
+                    state.spot,
+                    f"Candidate rejected — {micro_reason}",
+                    checks,
+                )
                 await asyncio.sleep(CONFIG.poll_seconds)
                 continue
 
@@ -106,24 +134,35 @@ async def run():
             signal.stop = max(q.ltp * 0.75, q.ltp - state.spot * 0.001)
             signal.target = q.ltp + (q.ltp - signal.stop) * 1.8
             signal.reason += f" | depth={micro_reason}"
+            checks = dict(getattr(signal, "checks", {}))
+            checks["Liquidity / spread"] = q.spread_pct <= CONFIG.max_spread_pct
+            checks["Microstructure confirmation"] = True
+            checks["Risk / session"] = True
+            signal.checks = checks
+
             lot_size = await client.contract_lot_size(expiry, signal.strike, signal.option_type)
             if lot_size <= 0:
-                Terminal.waiting(state.spot, "Candidate rejected: lot size unavailable")
+                Terminal.waiting(state.spot, "Candidate rejected: lot size unavailable", checks)
                 await asyncio.sleep(CONFIG.poll_seconds)
                 continue
+
             raw_qty = risk.size(signal)
             qty = (raw_qty // lot_size) * lot_size
             if qty <= 0:
-                Terminal.waiting(state.spot, "Candidate rejected: position size is below one lot")
+                Terminal.waiting(state.spot, "Candidate rejected: position size is below one lot", checks)
                 await asyncio.sleep(CONFIG.poll_seconds)
                 continue
+
             try:
                 p = await execution.enter(signal, qty)
-                Terminal.active(p)
+                Terminal.active(p, state.spot)
             except Exception as exc:
-                Terminal.waiting(state.spot, f"Execution blocked: {exc}")
+                Terminal.waiting(state.spot, f"Execution blocked: {exc}", checks)
+
             await asyncio.sleep(CONFIG.poll_seconds)
+
     except KeyboardInterrupt:
-        print("\nQUANTNIFTY stopped by user.")
+        # Keep shutdown output to a single final screen rather than a log stream.
+        Terminal.waiting(state.spot, "Stopped by user.")
     finally:
         await client.close()
