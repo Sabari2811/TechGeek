@@ -26,49 +26,19 @@ class IndstocksClient:
         return payload["data"]
 
     async def market_depth(self, security_ids: list[str]) -> dict:
-        """Return depth data, trying documented response variants."""
-        ids = [str(sid) for sid in security_ids if sid]
-        codes = [f"NFO_{sid}" for sid in ids]
+        """Return provider depth for the requested NFO contracts."""
+        codes = [f"NFO_{sid}" for sid in security_ids if sid]
         if not codes:
             return {}
         params = {"scrip-codes": ",".join(codes)}
 
-        # Primary five-level endpoint.
-        try:
-            r = await self.http.get("/market/quotes/mkt", params=params)
-            r.raise_for_status()
-            payload = r.json()
-            data = payload.get("data", {}) if payload.get("status") == "success" else {}
-            if any(extract_market_depth(data, sid) for sid in ids):
-                return data
-        except (httpx.HTTPError, ValueError):
-            pass
-
-        # Full quote endpoint also exposes market_depth.
-        try:
-            r = await self.http.get("/market/quotes/full", params=params)
-            r.raise_for_status()
-            payload = r.json()
-            data = payload.get("data", {}) if payload.get("status") == "success" else {}
-            if any(extract_market_depth(data, sid) for sid in ids):
-                return data
-        except (httpx.HTTPError, ValueError):
-            pass
-
-        # Some provider versions normalize the query using NSE_ prefix for
-        # index/derivative quote wrappers. Retry using the bare security IDs.
-        try:
-            bare_params = {"scrip-codes": ",".join(ids)}
-            r = await self.http.get("/market/quotes/full", params=bare_params)
-            r.raise_for_status()
-            payload = r.json()
-            data = payload.get("data", {}) if payload.get("status") == "success" else {}
-            if any(extract_market_depth(data, sid) for sid in ids):
-                return data
-        except (httpx.HTTPError, ValueError):
-            pass
-
-        return {}
+        # Primary five-level depth endpoint.
+        r = await self.http.get("/market/quotes/mkt", params=params)
+        r.raise_for_status()
+        payload = r.json()
+        if payload.get("status") == "success":
+            return payload.get("data", {})
+        raise RuntimeError(payload)
 
     async def contract_lot_size(self, expiry: str, strike: float, option_type: str) -> int:
         params = {"underlying":"NIFTY", "segment":"DERIVATIVE", "instrument_type":"OPTIDX",
@@ -90,7 +60,7 @@ class IndstocksClient:
         return r.json()
 
     async def cancel_order(self, order_id: str):
-        r = await self.http.post("/order/cancel", json={"order_id":order_id, "segment":"DERIVATIVE"})
+        r = await self.http.post("/order/cancel", json={"order_id":order_id,"segment":"DERIVATIVE"})
         r.raise_for_status()
         return r.json()
 
@@ -107,56 +77,74 @@ class IndstocksClient:
                 yield json.loads(raw)
 
 
+def _unwrap_depth(value: dict) -> dict:
+    """Return a payload containing market_depth, regardless of common wrappers."""
+    if not isinstance(value, dict):
+        return {}
+    if isinstance(value.get("market_depth"), dict):
+        return value
+    for key in ("data", "result", "quote", "quotes", "instrument", "item"):
+        child = value.get(key)
+        if isinstance(child, dict):
+            found = _unwrap_depth(child)
+            if found:
+                return found
+    return {}
+
+
 def extract_market_depth(data: dict, security_id: str) -> dict:
-    """Normalize common INDstocks depth response wrappers for one security."""
+    """Normalize INDstocks depth response wrappers for one security."""
     if not isinstance(data, dict) or not security_id:
         return {}
 
     sid = str(security_id)
     candidates = [
-        f"NFO_{sid}",
-        f"NFO:{sid}",
-        f"NSE_{sid}",
-        f"NSE:{sid}",
+        f"NFO_{sid}", f"NFO:{sid}", f"NFO-{sid}",
+        f"NSE_{sid}", f"NSE:{sid}", f"NSE-{sid}",
         sid,
     ]
     for key in candidates:
         value = data.get(key)
-        if isinstance(value, dict) and value.get("market_depth"):
-            return value
+        found = _unwrap_depth(value) if isinstance(value, dict) else {}
+        if found:
+            return found
 
-    if data.get("market_depth"):
-        return data
+    found = _unwrap_depth(data)
+    if found:
+        return found
 
-    # Some broker wrappers use a list under data/results/quotes/instruments.
-    for container_key in ("data", "results", "quotes", "instruments"):
+    # Common list wrappers with an explicit security identifier.
+    for container_key in ("data", "results", "quotes", "instruments", "items"):
         items = data.get(container_key)
         if isinstance(items, list):
             for item in items:
                 if not isinstance(item, dict):
                     continue
-                item_sid = str(item.get("security_id") or item.get("securityId") or item.get("scrip_code") or item.get("scripCode") or "")
-                if item_sid == sid and item.get("market_depth"):
-                    return item
+                item_sid = str(item.get("security_id") or item.get("securityId") or
+                                item.get("scrip_code") or item.get("scripCode") or
+                                item.get("instrument_token") or item.get("instrumentToken") or "")
+                if item_sid == sid:
+                    found = _unwrap_depth(item)
+                    if found:
+                        return found
 
-    # Nested single-security wrappers.
-    for container_key in ("data", "result", "quote"):
-        nested = data.get(container_key)
-        if isinstance(nested, dict) and nested.get("market_depth"):
-            return nested
+    # Single-security mapping/list fallbacks.
+    dict_values = [v for v in data.values() if isinstance(v, dict)]
+    if len(dict_values) == 1:
+        found = _unwrap_depth(dict_values[0])
+        if found:
+            return found
 
-    # For a single-security request, a one-item mapping may omit the code key.
-    values = [v for v in data.values() if isinstance(v, dict)]
-    if len(values) == 1 and values[0].get("market_depth"):
-        return values[0]
     return {}
 
 
 def _num(raw: dict, *names: str) -> float:
     for name in names:
         if raw.get(name) is not None:
-            try: return float(raw[name])
-            except (TypeError, ValueError): pass
+            try:
+                return float(raw[name])
+            except (TypeError, ValueError):
+                pass
     return 0.0
 
 
@@ -166,11 +154,13 @@ def load_chain_into_state(state: MarketState, data: dict):
     state.timestamp = datetime.now(IST)
     if state.spot > 0:
         state.spot_history.append(state.spot)
-        if len(state.spot_history) > 600: state.spot_history.pop(0)
+        if len(state.spot_history) > 600:
+            state.spot_history.pop(0)
     for strike_text, legs in data.get("strikes", {}).items():
         strike = float(strike_text)
         for option_type, raw in (("CE", legs.get("ce")), ("PE", legs.get("pe"))):
-            if not raw: continue
+            if not raw:
+                continue
             q = OptionQuote(
                 strike, option_type, str(raw.get("security_id","")), str(raw.get("trading_symbol","")),
                 _num(raw,"last_price"), _num(raw,"top_bid_price","bid_price"), _num(raw,"top_ask_price","ask_price"),
