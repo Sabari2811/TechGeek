@@ -25,5 +25,17 @@ def test_extract_depth_direct_payload():
     assert result == direct
 
 
+def test_extract_depth_nested_nse_key():
+    nested = {"NSE_47273": {"quote": sample_depth()["NFO_47273"]}}
+    result = extract_market_depth(nested, "47273")
+    assert result.get("market_depth", {}).get("depth")
+
+
+def test_extract_depth_list_wrapper():
+    listed = {"data": [{"securityId": "47273", "result": sample_depth()["NFO_47273"]}]}
+    result = extract_market_depth(listed, "47273")
+    assert result.get("market_depth", {}).get("depth")
+
+
 def test_extract_depth_missing_returns_empty():
     assert extract_market_depth({"NFO_1": {}}, "47273") == {}
