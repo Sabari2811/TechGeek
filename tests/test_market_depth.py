@@ -1,3 +1,4 @@
+import asyncio
 import pytest
 
 from app.market import IndstocksClient, extract_market_depth
@@ -83,44 +84,48 @@ class FakeHttp:
         raise AssertionError(path)
 
 
-@pytest.mark.asyncio
-async def test_market_depth_uses_full_quote_fallback_when_mkt_has_no_depth():
-    mkt = {"status": "success", "data": {"NFO_47273": {"ltp": 10.0}}}
-    full = {"status": "success", "data": sample_depth()}
-    client = IndstocksClient()
-    client.http = FakeHttp(mkt, full)
-    result = await client.market_depth(["47273"])
-    assert extract_market_depth(result, "47273")
-    assert client.http.paths == ["/market/quotes/mkt", "/market/quotes/full"]
+def test_market_depth_uses_full_quote_fallback_when_mkt_has_no_depth():
+    async def scenario():
+        mkt = {"status": "success", "data": {"NFO_47273": {"ltp": 10.0}}}
+        full = {"status": "success", "data": sample_depth()}
+        client = IndstocksClient()
+        client.http = FakeHttp(mkt, full)
+        result = await client.market_depth(["47273"])
+        assert extract_market_depth(result, "47273")
+        assert client.http.paths == ["/market/quotes/mkt", "/market/quotes/full"]
+    asyncio.run(scenario())
 
 
-@pytest.mark.asyncio
-async def test_market_depth_does_not_fallback_when_mkt_has_depth():
-    mkt = {"status": "success", "data": sample_depth()}
-    full = {"status": "success", "data": {}}
-    client = IndstocksClient()
-    client.http = FakeHttp(mkt, full)
-    result = await client.market_depth(["47273"])
-    assert extract_market_depth(result, "47273")
-    assert client.http.paths == ["/market/quotes/mkt"]
+def test_market_depth_does_not_fallback_when_mkt_has_depth():
+    async def scenario():
+        mkt = {"status": "success", "data": sample_depth()}
+        full = {"status": "success", "data": {}}
+        client = IndstocksClient()
+        client.http = FakeHttp(mkt, full)
+        result = await client.market_depth(["47273"])
+        assert extract_market_depth(result, "47273")
+        assert client.http.paths == ["/market/quotes/mkt"]
+    asyncio.run(scenario())
 
 
-@pytest.mark.asyncio
-async def test_market_depth_returns_full_response_even_without_depth():
-    mkt = {"status": "success", "data": {"NFO_47273": {"ltp": 10.0}}}
-    full = {"status": "success", "data": {"NFO_47273": {"ltp": 10.1}}}
-    client = IndstocksClient()
-    client.http = FakeHttp(mkt, full)
-    result = await client.market_depth(["47273"])
-    assert result == full
-    assert extract_market_depth(result, "47273") == {}
+def test_market_depth_returns_full_response_even_without_depth():
+    async def scenario():
+        mkt = {"status": "success", "data": {"NFO_47273": {"ltp": 10.0}}}
+        full = {"status": "success", "data": {"NFO_47273": {"ltp": 10.1}}}
+        client = IndstocksClient()
+        client.http = FakeHttp(mkt, full)
+        result = await client.market_depth(["47273"])
+        assert result == full
+        assert extract_market_depth(result, "47273") == {}
+    asyncio.run(scenario())
 
 
-@pytest.mark.asyncio
-async def test_market_depth_rejects_provider_error():
-    mkt = {"status": "error", "message": "unavailable"}
-    full = {"status": "success", "data": sample_depth()}
-    client = IndstocksClient()
-    client.http = FakeHttp(mkt, full)
-    with pytest.raises(RuntimeError):
-        await client.market_depth(["47273"])
+def test_market_depth_rejects_provider_error():
+    async def scenario():
+        mkt = {"status": "error", "message": "unavailable"}
+        full = {"status": "success", "data": sample_depth()}
+        client = IndstocksClient()
+        client.http = FakeHttp(mkt, full)
+        with pytest.raises(RuntimeError):
+            await client.market_depth(["47273"])
+    asyncio.run(scenario())
