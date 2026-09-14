@@ -2,7 +2,7 @@ import asyncio
 from datetime import datetime
 from .config import CONFIG
 from .models import MarketState
-from .market import IndstocksClient, load_chain_into_state, extract_market_depth
+from .market import IndstocksClient, load_chain_into_state, extract_market_depth, summarize_market_depth_payload
 from .math_engine import QuantEngine
 from .microstructure import MicrostructureEngine, MicrostructureState
 from .risk import RiskManager
@@ -113,15 +113,13 @@ async def run():
                 await asyncio.sleep(CONFIG.poll_seconds)
                 continue
 
+            depth_diag = ""
             try:
                 depth_data = await client.market_depth([q.security_id])
+                depth_diag = summarize_market_depth_payload(depth_data, q.security_id)
                 raw_depth = extract_market_depth(depth_data, q.security_id)
                 micro = MicrostructureEngine.from_depth(q.security_id, raw_depth, micro_state)
                 confirmed, micro_reason = MicrostructureEngine.confirmation(micro)
-                if micro is None:
-                    # Preserve the existing user-facing WAIT semantics while exposing
-                    # enough provider/identifier context to diagnose the exact contract.
-                    micro_reason = f"microstructure unavailable (security_id={q.security_id})"
             except Exception as exc:
                 confirmed, micro_reason = False, f"depth feed unavailable: {exc}"
 
@@ -132,7 +130,10 @@ async def run():
             signal.checks = checks
 
             if not confirmed:
-                Terminal.waiting(state.spot, f"Candidate rejected — {micro_reason}", checks)
+                reason_text = f"Candidate rejected — {micro_reason} (security_id={q.security_id})"
+                if micro_reason == "microstructure unavailable" and depth_diag:
+                    reason_text += f" | {depth_diag}"
+                Terminal.waiting(state.spot, reason_text, checks)
                 await asyncio.sleep(CONFIG.poll_seconds)
                 continue
 
