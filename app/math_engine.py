@@ -7,9 +7,8 @@ from .models import MarketState, OptionQuote, TradeSignal
 class QuantEngine:
     """Deterministic mathematical signal engine. No EMA, VWAP or LLM in the hot path.
 
-    The model intentionally uses a soft evidence score rather than making every
-    indicator a mandatory gate. Only EV, execution quality and risk controls are
-    hard requirements at the orchestration layer.
+    Evidence is scored softly so the engine does not require every variable to
+    agree. Hard entry controls remain EV, execution quality and risk.
     """
 
     @staticmethod
@@ -61,13 +60,11 @@ class QuantEngine:
         """Soft evidence score. Components rank candidates; they are not gates."""
         valuation = max(0.0, min(25.0, 12.5 + 25.0 * mispricing))
         probability_score = max(0.0, min(20.0, 40.0 * (probability - 0.50)))
-
         if rv > 0 and iv > 0:
             ratio = iv / rv
             volatility = max(0.0, 15.0 - abs(math.log(ratio)) * 8.0)
         else:
             volatility = 7.5
-
         participation = min(15.0, abs(oi_change) / max(oi, 1.0) * 150.0)
         volume_score = min(10.0, math.log1p(max(volume, 0.0)) / 10.0)
         greek_score = min(15.0, abs(delta) * 15.0)
@@ -84,9 +81,10 @@ class QuantEngine:
         iv = q.iv / 100.0 if q.iv > 1 else q.iv
         vol = max(rv, iv, 0.05)
 
-        # Use actual session minutes remaining instead of a UTC-minute modulo shortcut.
+        # Estimate remaining session time without the previous UTC-minute shortcut.
         now = datetime.now(timezone.utc)
-        minutes = max(5.0, 15 * 60 - (now.hour * 60 + now.minute))
+        session_minutes = now.hour * 60 + now.minute
+        minutes = max(5.0, 15 * 60 - session_minutes)
         p_spot = cls.probability_above(state.spot, q.strike, vol, minutes)
         if q.option_type == "PE":
             p_spot = 1.0 - p_spot
@@ -106,31 +104,25 @@ class QuantEngine:
         score = cls._score(mispricing, probability, iv, rv, q.oi_change, q.oi, q.volume, q.delta)
         checks = {
             "Mathematical valuation": fair >= q.ltp,
-            "Probability edge": probability >= 0.55,
-            "IV / RV measured": iv > 0 and rv > 0,
-            "OI participation": abs(q.oi_change) > 0,
-            "Volume participation": q.volume > 0,
+            "Probability evidence": probability >= 0.55,
+            "IV / RV data": iv > 0 and rv > 0,
+            "OI activity": abs(q.oi_change) > 0,
+            "Volume activity": q.volume > 0,
             "Greeks available": abs(q.delta) > 0 or abs(q.gamma) > 0,
             "Positive net EV": net_ev >= 0,
             "Spread within limit": q.spread_pct <= 0.04,
         }
-
-        return TradeSignal(
-            action="BUY",
-            option_type=q.option_type,
-            strike=q.strike,
-            security_id=q.security_id,
-            symbol=q.symbol,
-            entry=q.ask,
-            stop=stop,
-            target=target,
-            quantity=0,
-            probability=probability,
-            fair_value=fair,
-            expected_value=ev,
-            net_expected_value=net_ev,
+        signal = TradeSignal(
+            action="BUY", option_type=q.option_type, strike=q.strike,
+            security_id=q.security_id, symbol=q.symbol, entry=q.ask,
+            stop=stop, target=target, quantity=0, probability=probability,
+            fair_value=fair, expected_value=ev, net_expected_value=net_ev,
             reason=f"score={score:.1f}/100, prob={probability:.2%}, fair={fair:.2f}, netEV={net_ev:.2f}",
         )
+        # Runtime metadata keeps the core dataclass backward-compatible.
+        signal.score = score
+        signal.checks = checks
+        return signal
 
     @classmethod
     def best_signal(cls, state: MarketState, min_net_ev: float) -> TradeSignal | None:
@@ -142,6 +134,5 @@ class QuantEngine:
             s = cls.evaluate(state, q, risk_per_share)
             if s and s.net_expected_value >= min_net_ev:
                 candidates.append(s)
-
-        # EV is the primary objective. Score breaks ties; this avoids over-filtering.
-        return max(candidates, key=lambda x: (x.net_expected_value, x.reason), default=None)
+        # EV is primary; score is a tie-breaker. This prevents over-filtering.
+        return max(candidates, key=lambda x: (x.net_expected_value, getattr(x, "score", 0.0)), default=None)
