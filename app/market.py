@@ -26,12 +26,11 @@ class IndstocksClient:
         return payload["data"]
 
     async def market_depth(self, security_ids: list[str]) -> dict:
-        """Return usable provider depth; primary endpoint then full-quote fallback."""
+        """Return provider depth, falling back to full quotes when the mkt response has none."""
         codes = [f"NFO_{sid}" for sid in security_ids if sid]
         if not codes:
             return {}
         params = {"scrip-codes": ",".join(codes)}
-
         r = await self.http.get("/market/quotes/mkt", params=params)
         r.raise_for_status()
         payload = r.json()
@@ -39,10 +38,7 @@ class IndstocksClient:
             raise RuntimeError(payload)
         if extract_market_depth(payload, str(security_ids[0])):
             return payload
-
         full = await self.market_quote_fallback(security_ids)
-        if extract_market_depth(full, str(security_ids[0])):
-            return full
         return full if isinstance(full, dict) else payload
 
     async def market_quote_fallback(self, security_ids: list[str]) -> dict:
@@ -68,9 +64,9 @@ class IndstocksClient:
         return int(instruments[0].get("lot_size") or 0)
 
     async def place_order(self, txn_type: str, security_id: str, qty: int, price: float, remarks: str):
-        payload = {"txn_type":txn_type, "exchange":"NSE", "segment":"DERIVATIVE", "product":"INTRADAY",
-                   "order_type":"LIMIT", "limit_price":round(price,2), "validity":"DAY", "security_id":security_id,
-                   "qty":qty, "algo_id":"99999", "is_amo":False, "remarks":remarks[:100]}
+        payload = {"txn_type":txn_type,"exchange":"NSE","segment":"DERIVATIVE","product":"INTRADAY",
+                   "order_type":"LIMIT","limit_price":round(price,2),"validity":"DAY","security_id":security_id,
+                   "qty":qty,"algo_id":"99999","is_amo":False,"remarks":remarks[:100]}
         r = await self.http.post("/order", json=payload)
         r.raise_for_status()
         return r.json()
@@ -96,9 +92,16 @@ class IndstocksClient:
 def _extract_market_depth_object(value) -> dict:
     if not isinstance(value, dict):
         return {}
-    if isinstance(value.get("market_depth"), dict) and isinstance(value["market_depth"].get("depth"), list):
-        return value
-    for key in ("data", "result", "quote", "quotes", "instrument", "item"):
+    md = value.get("market_depth")
+    if isinstance(md, dict):
+        levels = md.get("depth")
+        if isinstance(levels, list) and levels:
+            return value
+        for key in ("depth", "levels"):
+            child = md.get(key)
+            if isinstance(child, list) and child:
+                return {"market_depth": {"depth": child}}
+    for key in ("data", "result", "quote", "quotes", "instrument", "item", "market_quote"):
         child = value.get(key)
         if isinstance(child, dict):
             found = _extract_market_depth_object(child)
@@ -109,29 +112,36 @@ def _extract_market_depth_object(value) -> dict:
                 found = _extract_market_depth_object(item)
                 if found:
                     return found
+    buys = value.get("buy") or value.get("bids")
+    sells = value.get("sell") or value.get("asks")
+    if isinstance(buys, list) and isinstance(sells, list) and buys and sells:
+        depth = []
+        for i in range(min(5, len(buys), len(sells))):
+            b, s = buys[i], sells[i]
+            if isinstance(b, dict) and isinstance(s, dict):
+                depth.append({"buy": b, "sell": s})
+        if depth:
+            return {"market_depth": {"depth": depth}}
     return {}
 
 
 def extract_market_depth(data: dict, security_id: str) -> dict:
-    """Normalize raw INDstocks market-depth payloads while preserving single-security data."""
+    """Normalize common INDstocks depth wrappers without inventing depth."""
     if not isinstance(data, dict) or not security_id:
         return {}
     sid = str(security_id)
     keys = [f"NFO_{sid}", f"NFO:{sid}", f"NFO-{sid}", f"NSE_{sid}", f"NSE:{sid}", f"NSE-{sid}", sid]
-
-    for root in (data, data.get("data")):
-        if not isinstance(root, dict):
-            continue
+    roots = [data]
+    if isinstance(data.get("data"), dict):
+        roots.append(data["data"])
+    for root in roots:
         for key in keys:
             value = root.get(key)
             if isinstance(value, dict):
                 found = _extract_market_depth_object(value)
                 if found:
                     return found
-
-    for root in (data, data.get("data")):
-        if not isinstance(root, dict):
-            continue
+    for root in roots:
         for container_key in ("results", "quotes", "instruments", "items"):
             items = root.get(container_key)
             if isinstance(items, list):
@@ -143,7 +153,6 @@ def extract_market_depth(data: dict, security_id: str) -> dict:
                         found = _extract_market_depth_object(item)
                         if found:
                             return found
-
     return _extract_market_depth_object(data)
 
 
