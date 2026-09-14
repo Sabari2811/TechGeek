@@ -26,10 +26,27 @@ class IndstocksClient:
         return payload["data"]
 
     async def market_depth(self, security_ids: list[str]) -> dict:
+        """Return depth data, with full-quote fallback when /mkt is empty/unavailable."""
         codes = [f"NFO_{sid}" for sid in security_ids if sid]
         if not codes:
             return {}
-        r = await self.http.get("/market/quotes/mkt", params={"scrip-codes": ",".join(codes)})
+        params = {"scrip-codes": ",".join(codes)}
+
+        # Primary five-level depth endpoint.
+        try:
+            r = await self.http.get("/market/quotes/mkt", params=params)
+            r.raise_for_status()
+            payload = r.json()
+            if payload.get("status") == "success":
+                data = payload.get("data", {})
+                if extract_market_depth(data, str(security_ids[0])):
+                    return data
+        except (httpx.HTTPError, ValueError):
+            pass
+
+        # /quotes/full also contains market_depth and is a useful provider-side
+        # fallback when the dedicated market-depth response is empty/transient.
+        r = await self.http.get("/market/quotes/full", params=params)
         r.raise_for_status()
         payload = r.json()
         if payload.get("status") != "success":
