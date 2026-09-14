@@ -116,8 +116,18 @@ async def run():
             depth_diag = ""
             try:
                 depth_data = await client.market_depth([q.security_id])
-                depth_diag = summarize_market_depth_payload(depth_data, q.security_id)
                 raw_depth = extract_market_depth(depth_data, q.security_id)
+                if not raw_depth:
+                    fallback_data = await client.market_quote_fallback([q.security_id])
+                    if fallback_data:
+                        depth_data = fallback_data
+                        depth_diag = summarize_market_depth_payload(depth_data, q.security_id)
+                        raw_depth = extract_market_depth(depth_data, q.security_id)
+                    else:
+                        depth_diag = summarize_market_depth_payload(depth_data, q.security_id)
+                else:
+                    depth_diag = summarize_market_depth_payload(depth_data, q.security_id)
+
                 micro = MicrostructureEngine.from_depth(q.security_id, raw_depth, micro_state)
                 confirmed, micro_reason = MicrostructureEngine.confirmation(micro)
             except Exception as exc:
