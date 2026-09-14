@@ -1,4 +1,5 @@
 import asyncio
+from datetime import datetime
 from .config import CONFIG
 from .models import MarketState
 from .market import IndstocksClient, load_chain_into_state
@@ -31,9 +32,17 @@ async def run():
     learning = IncrementalLearner()
     execution = ExecutionEngine(client)
     expiry = None
+    risk_day = datetime.now(CONFIG.market_time().tzinfo).date()
 
     try:
         while True:
+            today = datetime.now(CONFIG.market_time().tzinfo).date()
+            if today != risk_day:
+                risk.state.trades_today = 0
+                risk.state.realized_pnl = 0.0
+                risk.state.halted = False
+                risk.state.halt_reason = ""
+                risk_day = today
             learning.learn_if_new_day()
 
             if not CONFIG.session_active():
