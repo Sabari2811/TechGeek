@@ -5,6 +5,7 @@ import websockets
 from .config import CONFIG, IST
 from .models import MarketState, OptionQuote
 
+
 class IndstocksClient:
     def __init__(self):
         self.base_url = CONFIG.base_url.rstrip("/")
@@ -71,12 +72,51 @@ class IndstocksClient:
             async for raw in ws:
                 yield json.loads(raw)
 
+
+def extract_market_depth(data: dict, security_id: str) -> dict:
+    """Normalize common INDstocks depth response wrappers for one security."""
+    if not isinstance(data, dict) or not security_id:
+        return {}
+
+    candidates = [
+        f"NFO_{security_id}",
+        f"NFO:{security_id}",
+        security_id,
+        str(security_id),
+    ]
+    for key in candidates:
+        value = data.get(key)
+        if isinstance(value, dict) and value.get("market_depth"):
+            return value
+
+    if data.get("market_depth"):
+        return data
+
+    # Some broker wrappers use a list under data/results. Accept a matching id.
+    for container_key in ("data", "results", "quotes", "instruments"):
+        items = data.get(container_key)
+        if isinstance(items, list):
+            for item in items:
+                if not isinstance(item, dict):
+                    continue
+                sid = str(item.get("security_id") or item.get("securityId") or item.get("scrip_code") or "")
+                if sid == str(security_id) and item.get("market_depth"):
+                    return item
+
+    # For a single-security request, a one-item mapping may omit the code key.
+    values = [v for v in data.values() if isinstance(v, dict)]
+    if len(values) == 1 and values[0].get("market_depth"):
+        return values[0]
+    return {}
+
+
 def _num(raw: dict, *names: str) -> float:
     for name in names:
         if raw.get(name) is not None:
             try: return float(raw[name])
             except (TypeError, ValueError): pass
     return 0.0
+
 
 def load_chain_into_state(state: MarketState, data: dict):
     state.spot = _num(data, "underlying_ltp")
