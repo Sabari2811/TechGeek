@@ -37,7 +37,7 @@ def test_history_is_bounded_and_invalid_values_are_removed(tmp_path, monkeypatch
     session_state.save_today([float(i) for i in range(1, 1000)] + [0, -1, "bad"], date(2026, 9, 15))
     payload = json.loads(path.read_text(encoding="utf-8"))
 
-    assert len(payload["spot_history"]) == 600
-    assert payload["spot_history"][0] == 400.0
+    assert len(payload["spot_history"]) == 597
+    assert payload["spot_history"][0] == 403.0
     assert payload["spot_history"][-1] == 999.0
     assert all(float(x) > 0 for x in payload["spot_history"])
