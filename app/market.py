@@ -26,7 +26,7 @@ class IndstocksClient:
         return payload["data"]
 
     async def market_depth(self, security_ids: list[str]) -> dict:
-        """Return provider depth, falling back to full quotes when the mkt response has none."""
+        """Return provider depth; primary endpoint then full-quote fallback."""
         codes = [f"NFO_{sid}" for sid in security_ids if sid]
         if not codes:
             return {}
@@ -89,70 +89,111 @@ class IndstocksClient:
                 yield json.loads(raw)
 
 
-def _extract_market_depth_object(value) -> dict:
+def _as_levels(value) -> list[dict]:
+    if isinstance(value, list):
+        return [item for item in value if isinstance(item, dict)]
+    if isinstance(value, dict):
+        for key in ("depth", "levels", "items", "rows", "data"):
+            child = value.get(key)
+            if isinstance(child, list):
+                return [item for item in child if isinstance(item, dict)]
+    return []
+
+
+def _pair_bid_ask_levels(buys, sells) -> dict:
+    buys = _as_levels(buys)
+    sells = _as_levels(sells)
+    if not buys or not sells:
+        return {}
+    depth = []
+    for i in range(min(5, len(buys), len(sells))):
+        if isinstance(buys[i], dict) and isinstance(sells[i], dict):
+            depth.append({"buy": buys[i], "sell": sells[i]})
+    return {"market_depth": {"depth": depth}} if depth else {}
+
+
+def _extract_market_depth_object(value, _seen=None) -> dict:
+    """Find documented/common depth shapes without inventing missing levels."""
     if not isinstance(value, dict):
         return {}
+    if _seen is None:
+        _seen = set()
+    marker = id(value)
+    if marker in _seen:
+        return {}
+    _seen.add(marker)
+
     md = value.get("market_depth")
     if isinstance(md, dict):
-        levels = md.get("depth")
-        if isinstance(levels, list) and levels:
-            return value
-        for key in ("depth", "levels"):
-            child = md.get(key)
-            if isinstance(child, list) and child:
-                return {"market_depth": {"depth": child}}
-    for key in ("data", "result", "quote", "quotes", "instrument", "item", "market_quote"):
-        child = value.get(key)
+        levels = _as_levels(md.get("depth")) or _as_levels(md.get("levels"))
+        if levels:
+            return {"market_depth": {"depth": levels[:5]}}
+        paired = _pair_bid_ask_levels(md.get("buy") or md.get("bids") or md.get("bid"),
+                                      md.get("sell") or md.get("asks") or md.get("ask"))
+        if paired:
+            return paired
+
+    paired = _pair_bid_ask_levels(value.get("buy") or value.get("bids") or value.get("bid"),
+                                  value.get("sell") or value.get("asks") or value.get("ask"))
+    if paired:
+        return paired
+
+    # Provider wrappers have changed over time; inspect nested objects/lists rather than
+    # assuming only data/result/quote wrappers. This remains read-only and never fabricates depth.
+    for child in value.values():
         if isinstance(child, dict):
-            found = _extract_market_depth_object(child)
+            found = _extract_market_depth_object(child, _seen)
             if found:
                 return found
         elif isinstance(child, list):
             for item in child:
-                found = _extract_market_depth_object(item)
-                if found:
-                    return found
-    buys = value.get("buy") or value.get("bids")
-    sells = value.get("sell") or value.get("asks")
-    if isinstance(buys, list) and isinstance(sells, list) and buys and sells:
-        depth = []
-        for i in range(min(5, len(buys), len(sells))):
-            b, s = buys[i], sells[i]
-            if isinstance(b, dict) and isinstance(s, dict):
-                depth.append({"buy": b, "sell": s})
-        if depth:
-            return {"market_depth": {"depth": depth}}
+                if isinstance(item, dict):
+                    found = _extract_market_depth_object(item, _seen)
+                    if found:
+                        return found
     return {}
 
 
 def extract_market_depth(data: dict, security_id: str) -> dict:
-    """Normalize common INDstocks depth wrappers without inventing depth."""
+    """Normalize INDstocks depth wrappers without inventing depth."""
     if not isinstance(data, dict) or not security_id:
         return {}
     sid = str(security_id)
     keys = [f"NFO_{sid}", f"NFO:{sid}", f"NFO-{sid}", f"NSE_{sid}", f"NSE:{sid}", f"NSE-{sid}", sid]
     roots = [data]
-    if isinstance(data.get("data"), dict):
+    if isinstance(data.get("data"), (dict, list)):
         roots.append(data["data"])
+
     for root in roots:
-        for key in keys:
-            value = root.get(key)
-            if isinstance(value, dict):
-                found = _extract_market_depth_object(value)
-                if found:
-                    return found
+        if isinstance(root, dict):
+            for key in keys:
+                value = root.get(key)
+                if isinstance(value, dict):
+                    found = _extract_market_depth_object(value)
+                    if found:
+                        return found
+
     for root in roots:
-        for container_key in ("results", "quotes", "instruments", "items"):
-            items = root.get(container_key)
-            if isinstance(items, list):
-                for item in items:
-                    if not isinstance(item, dict):
-                        continue
-                    item_sid = str(item.get("security_id") or item.get("securityId") or item.get("scrip_code") or item.get("scripCode") or item.get("instrument_token") or item.get("instrumentToken") or "")
-                    if item_sid == sid:
-                        found = _extract_market_depth_object(item)
-                        if found:
-                            return found
+        items = root if isinstance(root, list) else None
+        if isinstance(root, dict):
+            for container_key in ("results", "quotes", "instruments", "items", "data"):
+                candidate = root.get(container_key)
+                if isinstance(candidate, list):
+                    items = candidate
+                    break
+        if isinstance(items, list):
+            for item in items:
+                if not isinstance(item, dict):
+                    continue
+                item_sid = str(item.get("security_id") or item.get("securityId") or
+                               item.get("scrip_code") or item.get("scripCode") or
+                               item.get("instrument_token") or item.get("instrumentToken") or
+                               item.get("token") or "")
+                if item_sid == sid:
+                    found = _extract_market_depth_object(item)
+                    if found:
+                        return found
+
     return _extract_market_depth_object(data)
 
 
