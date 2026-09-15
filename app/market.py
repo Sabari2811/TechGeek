@@ -1,3 +1,4 @@
+import asyncio
 import json
 from datetime import datetime
 import httpx
@@ -26,7 +27,7 @@ class IndstocksClient:
         return payload["data"]
 
     async def market_depth(self, security_ids: list[str]) -> dict:
-        """Return provider depth; primary endpoint then full-quote fallback."""
+        """Return provider depth; REST first, then full quote, then WebSocket quote fallback."""
         codes = [f"NFO_{sid}" for sid in security_ids if sid]
         if not codes:
             return {}
@@ -38,7 +39,14 @@ class IndstocksClient:
             raise RuntimeError(payload)
         if extract_market_depth(payload, str(security_ids[0])):
             return payload
+
         full = await self.market_quote_fallback(security_ids)
+        if extract_market_depth(full, str(security_ids[0])):
+            return full
+
+        ws = await self.websocket_quote_snapshot(security_ids)
+        if extract_market_depth(ws, str(security_ids[0])):
+            return ws
         return full if isinstance(full, dict) else payload
 
     async def market_quote_fallback(self, security_ids: list[str]) -> dict:
@@ -51,6 +59,53 @@ class IndstocksClient:
         if payload.get("status") != "success":
             raise RuntimeError(payload)
         return payload
+
+    async def websocket_quote_snapshot(self, security_ids: list[str], timeout_seconds: float = 1.5) -> dict:
+        """Read a short quote-mode snapshot without weakening the depth gate.
+
+        INDstocks documents quote mode but does not publish its complete quote-mode
+        response schema. The same hardened depth normalizer is therefore used against
+        the complete message. If the stream carries no depth, this returns the raw
+        message and the caller continues to WAIT rather than inventing levels.
+        """
+        instruments = [f"NFO:{sid}" for sid in security_ids if sid]
+        if not instruments:
+            return {}
+        url = "wss://ws-prices.indstocks.com/api/v1/ws/prices"
+        try:
+            async with websockets.connect(
+                url,
+                additional_headers={"Authorization": CONFIG.access_token},
+                ping_interval=20,
+                ping_timeout=10,
+                open_timeout=3,
+            ) as ws:
+                await ws.send(json.dumps({
+                    "action": "subscribe",
+                    "mode": "quote",
+                    "instruments": instruments,
+                }))
+                loop = asyncio.get_running_loop()
+                deadline = loop.time() + max(0.2, timeout_seconds)
+                last_payload = {}
+                while loop.time() < deadline:
+                    remaining = max(0.05, deadline - loop.time())
+                    try:
+                        raw = await asyncio.wait_for(ws.recv(), timeout=remaining)
+                    except asyncio.TimeoutError:
+                        break
+                    try:
+                        payload = json.loads(raw) if isinstance(raw, str) else raw
+                    except (TypeError, json.JSONDecodeError):
+                        continue
+                    if not isinstance(payload, dict):
+                        continue
+                    last_payload = payload
+                    if extract_market_depth(payload, str(security_ids[0])):
+                        return payload
+                return last_payload
+        except Exception:
+            return {}
 
     async def contract_lot_size(self, expiry: str, strike: float, option_type: str) -> int:
         params = {"underlying":"NIFTY", "segment":"DERIVATIVE", "instrument_type":"OPTIDX",
