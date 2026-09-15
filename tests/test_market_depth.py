@@ -216,13 +216,17 @@ def test_market_depth_returns_full_response_even_without_depth(monkeypatch):
     asyncio.run(scenario())
 
 
-def test_market_depth_rejects_provider_error():
+def test_market_depth_falls_back_after_provider_error():
+    """A failed /mkt response may still recover through the documented full quote endpoint."""
     async def scenario():
         mkt = {"status": "error", "message": "unavailable"}
         full = {"status": "success", "data": sample_depth()}
         client = IndstocksClient()
         client.http = FakeHttp(mkt, full)
-        with pytest.raises(RuntimeError):
-            await client.market_depth(["47273"])
+        result = await client.market_depth(["47273"])
+        assert extract_market_depth(result, "47273")
+        assert client.http.paths == [
+            "/market/quotes/mkt", "/market/quotes/mkt", "/market/quotes/full"
+        ]
         await client.close()
     asyncio.run(scenario())
