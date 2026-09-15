@@ -85,6 +85,9 @@ class FakeHttp:
             return FakeResponse(self.full_payload)
         raise AssertionError(path)
 
+    async def aclose(self):
+        return None
+
 
 class FakeWebSocket:
     def __init__(self, messages):
