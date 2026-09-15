@@ -9,6 +9,7 @@ from .microstructure import MicrostructureEngine, MicrostructureState
 from .risk import RiskManager
 from .execution import ExecutionEngine
 from .learning import IncrementalLearner
+from .session_state import load_today, save_today
 from .terminal import Terminal
 
 
@@ -28,6 +29,11 @@ async def run():
 
     client = IndstocksClient()
     state = MarketState()
+    # Restore only today's spot observations. Options, positions and secrets are
+    # intentionally never persisted, so a restart cannot resurrect stale orders.
+    state.spot_history = load_today(CONFIG.market_time().date())
+    if state.spot_history:
+        state.spot = state.spot_history[-1]
     micro_state = MicrostructureState()
     risk = RiskManager()
     learning = IncrementalLearner()
@@ -44,6 +50,11 @@ async def run():
                 risk.state.halted = False
                 risk.state.halt_reason = ""
                 risk_day = today
+                state.spot_history.clear()
+                state.spot = 0.0
+                state.timestamp = None
+                expiry = None
+                save_today([], today)
             learning.learn_if_new_day()
 
             if not CONFIG.session_active():
@@ -56,8 +67,23 @@ async def run():
                     expiry = await next_expiry(client)
                 chain = await client.option_chain(expiry)
                 load_chain_into_state(state, chain)
+                save_today(state.spot_history, today)
             except Exception as exc:
                 Terminal.waiting(state.spot, f"Data feed warning: {exc}")
+                await asyncio.sleep(CONFIG.poll_seconds)
+                continue
+
+            unique_points = len(QuantEngine._unique_prices(state.spot_history))
+            if unique_points < 21:
+                Terminal.waiting(
+                    state.spot,
+                    f"Market data warming up — spot_points={unique_points}/21; RV needs 20 returns.",
+                    {
+                        "Session / risk": True,
+                        "Market data warm-up": False,
+                        "Realized volatility data": False,
+                    },
+                )
                 await asyncio.sleep(CONFIG.poll_seconds)
                 continue
 
