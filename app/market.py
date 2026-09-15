@@ -27,18 +27,34 @@ class IndstocksClient:
         return payload["data"]
 
     async def market_depth(self, security_ids: list[str]) -> dict:
-        """Return provider depth; REST first, then full quote, then WebSocket quote fallback."""
+        """Return verified provider depth without ever fabricating levels.
+
+        Transport order:
+          1. documented 5-level /market/quotes/mkt endpoint (with one retry)
+          2. documented /market/quotes/full endpoint (with one retry)
+          3. WebSocket quote snapshot as an opportunistic provider fallback
+
+        A successful HTTP envelope is not treated as usable depth unless the
+        response actually contains depth levels for the requested instrument.
+        """
         codes = [f"NFO_{sid}" for sid in security_ids if sid]
         if not codes:
             return {}
         params = {"scrip-codes": ",".join(codes)}
-        r = await self.http.get("/market/quotes/mkt", params=params)
-        r.raise_for_status()
-        payload = r.json()
-        if payload.get("status") != "success":
-            raise RuntimeError(payload)
-        if extract_market_depth(payload, str(security_ids[0])):
-            return payload
+
+        last_payload = {}
+        for attempt in range(2):
+            try:
+                r = await self.http.get("/market/quotes/mkt", params=params)
+                r.raise_for_status()
+                payload = r.json()
+                last_payload = payload
+                if payload.get("status") == "success" and extract_market_depth(payload, str(security_ids[0])):
+                    return payload
+            except Exception:
+                if attempt == 1:
+                    raise
+                await asyncio.sleep(0.12)
 
         full = await self.market_quote_fallback(security_ids)
         if extract_market_depth(full, str(security_ids[0])):
@@ -47,18 +63,29 @@ class IndstocksClient:
         ws = await self.websocket_quote_snapshot(security_ids)
         if extract_market_depth(ws, str(security_ids[0])):
             return ws
-        return full if isinstance(full, dict) else payload
+
+        # Preserve the most informative successful REST payload for diagnostics.
+        return full if isinstance(full, dict) else last_payload
 
     async def market_quote_fallback(self, security_ids: list[str]) -> dict:
         codes = [f"NFO_{sid}" for sid in security_ids if sid]
         if not codes:
             return {}
-        r = await self.http.get("/market/quotes/full", params={"scrip-codes": ",".join(codes)})
-        r.raise_for_status()
-        payload = r.json()
-        if payload.get("status") != "success":
-            raise RuntimeError(payload)
-        return payload
+        params = {"scrip-codes": ",".join(codes)}
+        last_payload = {}
+        for attempt in range(2):
+            try:
+                r = await self.http.get("/market/quotes/full", params=params)
+                r.raise_for_status()
+                payload = r.json()
+                last_payload = payload
+                if payload.get("status") == "success":
+                    return payload
+            except Exception:
+                if attempt == 1:
+                    raise
+                await asyncio.sleep(0.12)
+        return last_payload
 
     async def websocket_quote_snapshot(self, security_ids: list[str], timeout_seconds: float = 1.5) -> dict:
         """Read a short quote-mode snapshot without weakening the depth gate.
@@ -193,8 +220,6 @@ def _extract_market_depth_object(value, _seen=None) -> dict:
     if paired:
         return paired
 
-    # Provider wrappers have changed over time; inspect nested objects/lists rather than
-    # assuming only data/result/quote wrappers. This remains read-only and never fabricates depth.
     for child in value.values():
         if isinstance(child, dict):
             found = _extract_market_depth_object(child, _seen)
