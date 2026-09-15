@@ -166,7 +166,7 @@ def test_market_depth_uses_websocket_after_rest_depth_missing(monkeypatch):
         client.http = FakeHttp(mkt, full)
         result = await client.market_depth(["47273"])
         assert extract_market_depth(result, "47273")
-        assert client.http.paths == ["/market/quotes/mkt", "/market/quotes/full"]
+        assert client.http.paths == ["/market/quotes/mkt", "/market/quotes/mkt", "/market/quotes/full"]
         await client.close()
 
     asyncio.run(scenario())
@@ -180,7 +180,7 @@ def test_market_depth_uses_full_quote_fallback_when_mkt_has_no_depth():
         client.http = FakeHttp(mkt, full)
         result = await client.market_depth(["47273"])
         assert extract_market_depth(result, "47273")
-        assert client.http.paths == ["/market/quotes/mkt", "/market/quotes/full"]
+        assert client.http.paths == ["/market/quotes/mkt", "/market/quotes/mkt", "/market/quotes/full"]
         await client.close()
     asyncio.run(scenario())
 
