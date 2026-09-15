@@ -1,7 +1,6 @@
 import asyncio
 from datetime import datetime
-from zoneinfo import ZoneInfo
-from .config import CONFIG
+from .config import CONFIG, IST
 from .models import MarketState
 from .market import IndstocksClient, load_chain_into_state, extract_market_depth, summarize_market_depth_payload
 from .math_engine import QuantEngine
@@ -31,7 +30,7 @@ async def run():
     state = MarketState()
     # Restore only today's spot observations. Options, positions and secrets are
     # intentionally never persisted, so a restart cannot resurrect stale orders.
-    state.spot_history = load_today(CONFIG.market_time().date())
+    state.spot_history = load_today(datetime.now(IST).date())
     if state.spot_history:
         state.spot = state.spot_history[-1]
     micro_state = MicrostructureState()
@@ -39,11 +38,11 @@ async def run():
     learning = IncrementalLearner()
     execution = ExecutionEngine(client)
     expiry = None
-    risk_day = datetime.now(CONFIG.market_time().tzinfo).date()
+    risk_day = datetime.now(IST).date()
 
     try:
         while True:
-            today = datetime.now(CONFIG.market_time().tzinfo).date()
+            today = datetime.now(IST).date()
             if today != risk_day:
                 risk.state.trades_today = 0
                 risk.state.realized_pnl = 0.0
