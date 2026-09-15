@@ -1,5 +1,6 @@
 import asyncio
 from datetime import datetime
+from zoneinfo import ZoneInfo
 from .config import CONFIG
 from .models import MarketState
 from .market import IndstocksClient, load_chain_into_state, extract_market_depth, summarize_market_depth_payload
@@ -101,7 +102,19 @@ async def run():
 
             signal = QuantEngine.best_signal(state, CONFIG.min_net_ev, learner=learning)
             if not signal:
-                Terminal.waiting(state.spot, "No candidate meets the minimum mathematical EV.", {"Session / risk": True, "Minimum net EV": False})
+                phase, direction, confidence = QuantEngine.market_phase(state)
+                points = len(QuantEngine._unique_prices(state.spot_history))
+                reason_text = (
+                    f"No candidate meets minimum net EV ₹{CONFIG.min_net_ev:.2f} | "
+                    f"phase={phase} direction={direction} confidence={confidence:.2f} "
+                    f"spot_points={points}"
+                )
+                Terminal.waiting(state.spot, reason_text, {
+                    "Session / risk": True,
+                    "Minimum net EV": False,
+                    "Market phase": phase in {"EARLY_CONFIRMATION", "BREAKOUT"},
+                    "Spot history": points >= 12,
+                })
                 await asyncio.sleep(CONFIG.poll_seconds)
                 continue
 
