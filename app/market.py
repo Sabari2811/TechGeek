@@ -36,6 +36,8 @@ class IndstocksClient:
 
         A successful HTTP envelope is not treated as usable depth unless the
         response actually contains depth levels for the requested instrument.
+        A transient/provider error on the first endpoint does not prevent the
+        independent full-quote fallback from being attempted.
         """
         codes = [f"NFO_{sid}" for sid in security_ids if sid]
         if not codes:
@@ -52,9 +54,10 @@ class IndstocksClient:
                 if payload.get("status") == "success" and extract_market_depth(payload, str(security_ids[0])):
                     return payload
             except Exception:
-                if attempt == 1:
-                    raise
-                await asyncio.sleep(0.12)
+                # Retry the documented endpoint once, then continue to the
+                # independent fallback rather than failing the whole depth path.
+                if attempt == 0:
+                    await asyncio.sleep(0.12)
 
         full = await self.market_quote_fallback(security_ids)
         if extract_market_depth(full, str(security_ids[0])):
@@ -82,9 +85,8 @@ class IndstocksClient:
                 if payload.get("status") == "success":
                     return payload
             except Exception:
-                if attempt == 1:
-                    raise
-                await asyncio.sleep(0.12)
+                if attempt == 0:
+                    await asyncio.sleep(0.12)
         return last_payload
 
     async def websocket_quote_snapshot(self, security_ids: list[str], timeout_seconds: float = 1.5) -> dict:
