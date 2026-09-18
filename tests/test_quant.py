@@ -121,3 +121,18 @@ def test_market_state_set_spot_updates_timestamp_and_deduplicates():
     state.set_spot(100.0, now)
     assert state.timestamp == now
     assert state.spot_history == [100.0]
+
+
+def test_market_phase_prefers_real_observation_time_window():
+    from datetime import timedelta
+    state = MarketState(spot=100.0)
+    start = datetime(2026, 9, 18, 10, 0)
+    state.spot_observations = [
+        (start + timedelta(seconds=10 * i), 100.0 + 0.01 * i)
+        for i in range(60)
+    ]
+    state.spot_history = [price for _, price in state.spot_observations]
+    phase, direction, confidence = QuantEngine.market_phase(state)
+    assert direction == "BULLISH"
+    assert phase in {"EARLY_CONFIRMATION", "BREAKOUT", "TRANSITION"}
+    assert confidence > 0.0
