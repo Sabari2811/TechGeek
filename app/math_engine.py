@@ -401,6 +401,8 @@ class QuantEngine:
                 audit.rejected.pop("SIGNAL_READY", None)
             if audit.total_options == 0:
                 audit.reject("NO_OPTION_CONTRACTS")
-            elif not candidates:
+            elif (audit.phase in {"EARLY_CONFIRMATION", "BREAKOUT"}
+                  and audit.eligible_before_min_ev > 0
+                  and not candidates):
                 audit.reject("MIN_NET_EV_NOT_MET")
         return max(candidates, key=lambda x: (x.net_expected_value, x.score), default=None)
