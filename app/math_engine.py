@@ -251,8 +251,8 @@ class QuantEngine:
         return {
             "spot_points": len(recent),
             "fast_move_pct": (fast[-1] - fast[0]) / max(fast[0], 1e-9),
-            "regime_move_pct": (prices[-1] - prices[0]) / base,
-            "regime_range_pct": (max(prices) - min(prices)) / base,
+            "regime_move_pct": (recent[-1] - recent[0]) / base,
+            "regime_range_pct": (max(recent) - min(recent)) / base,
         }
 
     @classmethod
