@@ -264,6 +264,15 @@ class QuantEngine:
         if q.spread_pct > CONFIG.max_spread_pct:
             return None, "SPREAD_TOO_WIDE", metrics
 
+        # Hard market-regime gates run before fair value, probability and EV.
+        # This makes the audit truthful: no mathematical edge is evaluated while
+        # the market is still in accumulation or moving against the option side.
+        if phase not in {"EARLY_CONFIRMATION", "BREAKOUT"}:
+            return None, "MARKET_PHASE_WAIT", metrics
+        aligned = "BULLISH" if q.option_type == "CE" else "BEARISH"
+        if direction not in {"NEUTRAL", aligned}:
+            return None, "DIRECTION_MISMATCH", metrics
+
         cls.ensure_greeks(state, q)
         fair = cls.fair_value_proxy(state, q)
         rv = cls.realized_vol(state.spot_history)
@@ -282,7 +291,6 @@ class QuantEngine:
         p_spot = cls.probability_above(state.spot, q.strike, vol, minutes)
         if q.option_type == "PE":
             p_spot = 1.0 - p_spot
-        aligned = "BULLISH" if q.option_type == "CE" else "BEARISH"
         if direction == aligned:
             p_spot += 0.05 * phase_confidence
         elif direction != "NEUTRAL":
@@ -306,10 +314,6 @@ class QuantEngine:
 
         if net_ev < 0:
             return None, "NEGATIVE_NET_EV", metrics
-        if phase not in {"EARLY_CONFIRMATION", "BREAKOUT"}:
-            return None, "MARKET_PHASE_WAIT", metrics
-        if direction not in {"NEUTRAL", aligned}:
-            return None, "DIRECTION_MISMATCH", metrics
         if net_ev < 0:
             return None, "NEGATIVE_NET_EV", metrics
 
