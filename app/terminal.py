@@ -60,6 +60,37 @@ class Terminal:
         print("\nNo order. Waiting for the next mathematical edge.")
 
     @staticmethod
+    def waiting_audit(spot: float, audit, min_net_ev: float):
+        Terminal._header(spot)
+        print("\nSIGNAL")
+        print(f"  {Terminal._paint('●', YELLOW)} {Terminal._paint('WAIT', YELLOW)}")
+        print(f"  Blocking stage: {audit.blocking_reason}")
+        print(f"  Phase: {audit.phase} | Direction: {audit.phase_direction} | Confidence: {audit.phase_confidence:.2f}")
+        print(f"  Spot points: {audit.spot_points} | 1m move: {audit.fast_move_pct:+.3%} | 5m move: {audit.regime_move_pct:+.3%} | 5m range: {audit.regime_range_pct:.3%}")
+        print("\nOPTION CHAIN")
+        print(f"  Contracts: {audit.total_options} (CE {audit.calls} / PE {audit.puts})")
+        print(f"  Evaluated: {audit.evaluated} | Candidates above engine gates: {audit.eligible_before_min_ev} | Final ≥ ₹{min_net_ev:.2f}: {audit.final_candidates}")
+        print("\nREJECTION COUNTS")
+        if audit.rejected:
+            for reason, count in sorted(audit.rejected.items(), key=lambda x: (-x[1], x[0]))[:8]:
+                print(f"  {reason:<29} {count}")
+        else:
+            print("  No option contracts were available.")
+        if audit.best_rejected_symbol:
+            ev = audit.best_rejected_net_ev
+            ev_text = f"₹{ev:.2f}" if ev != float("-inf") else "--"
+            print("\nBEST REJECTED CANDIDATE")
+            print(f"  {audit.best_rejected_symbol} | reason={audit.best_rejected_reason}")
+            print(f"  netEV={ev_text} | probability={audit.best_rejected_probability:.1%} | phase={audit.best_rejected_phase} | direction={audit.best_rejected_direction}")
+        print("\nCHECKLIST")
+        Terminal._check("Session / risk", CONFIG.session_active())
+        Terminal._check("Spot history", audit.spot_points >= 12)
+        Terminal._check("Entry phase", audit.phase in {"EARLY_CONFIRMATION", "BREAKOUT"})
+        Terminal._check("Option contracts", audit.total_options > 0)
+        Terminal._check("Engine candidate", audit.final_candidates > 0)
+        print("\nNo order. Waiting for the next mathematical edge.")
+
+    @staticmethod
     def active(position: Position, spot: float = 0.0):
         Terminal._header(spot)
         s = position.signal
