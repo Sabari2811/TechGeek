@@ -177,6 +177,24 @@ class QuantEngine:
                 out.append(price)
         return out
 
+    @staticmethod
+    def _phase_series(state: MarketState) -> tuple[list[float], list[float]]:
+        observations = getattr(state, "spot_observations", [])
+        if len(observations) >= 12:
+            latest = observations[-1][0]
+            recent_obs = [(ts, price) for ts, price in observations if (latest - ts).total_seconds() <= 300]
+            if len(recent_obs) >= 12:
+                fast_obs = [(ts, price) for ts, price in recent_obs if (latest - ts).total_seconds() <= 60]
+                recent = [price for _, price in recent_obs]
+                fast = [price for _, price in fast_obs] if len(fast_obs) >= 5 else recent[-5:]
+                return QuantEngine._unique_prices(recent), QuantEngine._unique_prices(fast)
+        poll_seconds = max(CONFIG.poll_seconds, 0.5)
+        regime_points = max(12, min(150, round(300.0 / poll_seconds)))
+        fast_points = max(5, min(60, round(60.0 / poll_seconds)))
+        prices = cls._unique_prices(state.spot_history)[-regime_points:]
+        return prices, prices[-min(fast_points, len(prices)):]
+
+
     @classmethod
     def market_phase(cls, state: MarketState) -> tuple[str, str, float]:
         """Classify the spot market without requiring a completed breakout.
@@ -186,21 +204,12 @@ class QuantEngine:
         a large move. Accumulation is a watch state; only early confirmation or
         a still-acceptable breakout can become an entry candidate.
         """
-        # Spot observations are deduplicated and arrive roughly every poll interval.
-        # The old 12/5-point windows therefore represented only ~24/~10 seconds at
-        # the default 2-second poll rate. That made a multi-minute move look like
-        # "ACCUMULATION" whenever the last few seconds were quiet. Use a stable
-        # time-based approximation instead: 5 minutes for regime/direction and
-        # 1 minute for acceleration/confirmation.
-        poll_seconds = max(CONFIG.poll_seconds, 0.5)
-        regime_points = max(12, min(150, round(300.0 / poll_seconds)))
-        fast_points = max(5, min(60, round(60.0 / poll_seconds)))
-        prices = cls._unique_prices(state.spot_history)[-regime_points:]
-        if len(prices) < 12:
+        # Prefer real timestamps so a slow/fast polling interval cannot distort
+        # the regime window. Tests and restored pre-timestamp history use the
+        # bounded polling-count fallback.
+        recent, fast = cls._phase_series(state)
+        if len(recent) < 12:
             return "INSUFFICIENT_DATA", "NEUTRAL", 0.0
-
-        recent = prices
-        fast = prices[-min(fast_points, len(prices)):]
         base = max(recent[0], 1e-9)
         range_pct = (max(recent) - min(recent)) / base
         net_recent = (recent[-1] - recent[0]) / base
@@ -232,16 +241,12 @@ class QuantEngine:
 
     @classmethod
     def phase_metrics(cls, state: MarketState) -> dict[str, float | int | str]:
-        poll_seconds = max(CONFIG.poll_seconds, 0.5)
-        regime_points = max(12, min(150, round(300.0 / poll_seconds)))
-        fast_points = max(5, min(60, round(60.0 / poll_seconds)))
-        prices = cls._unique_prices(state.spot_history)[-regime_points:]
-        if len(prices) < 12:
+        recent, fast = cls._phase_series(state)
+        if len(recent) < 12:
             return {
-                "spot_points": len(prices), "fast_move_pct": 0.0,
+                "spot_points": len(recent), "fast_move_pct": 0.0,
                 "regime_move_pct": 0.0, "regime_range_pct": 0.0,
             }
-        fast = prices[-min(fast_points, len(prices)):]
         base = max(prices[0], 1e-9)
         return {
             "spot_points": len(prices),
