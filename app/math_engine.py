@@ -21,7 +21,13 @@ class QuantEngine:
         return [math.log(b / a) for a, b in zip(prices, prices[1:]) if a > 0 and b > 0]
 
     @classmethod
-    def realized_vol(cls, prices: list[float], periods_per_year: int = 252 * 375) -> float:
+    def realized_vol(cls, prices: list[float], periods_per_year: int | None = None) -> float:
+        # The live option-chain loop polls roughly every 2 seconds. The previous
+        # annualization assumed 1-minute observations, overstating/understating RV
+        # depending on poll cadence. Use the configured polling interval so the
+        # volatility scale matches the actual observation spacing.
+        if periods_per_year is None:
+            periods_per_year = int(252 * 375 * 60 / max(CONFIG.poll_seconds, 0.5))
         r = cls.returns(prices[-240:])
         if len(r) < 20:
             return 0.0
@@ -201,15 +207,8 @@ class QuantEngine:
         net_fast = (fast[-1] - fast[0]) / max(fast[0], 1e-9)
         direction = "BULLISH" if net_recent > 0.00025 else "BEARISH" if net_recent < -0.00025 else "NEUTRAL"
 
-        # Accumulation means both price compression and limited directional drift
-        # across the full 5-minute regime window. A quiet last few seconds must not
-        # erase a meaningful multi-minute move.
-        if range_pct <= 0.0035 and abs(net_recent) <= 0.0012:
-            confidence = min(0.95, 0.55 + max(0.0, 0.0035 - range_pct) * 60.0)
-            return "ACCUMULATION", direction, confidence
-
-        # Confirm acceleration over roughly one minute rather than five polling
-        # observations (~10 seconds at the default poll interval).
+        # Evaluate the fast window first. A genuine 1-minute directional impulse
+        # must not be swallowed by the broader accumulation classification.
         if abs(net_fast) >= CONFIG.phase_breakout_move_pct:
             confidence = min(0.98, 0.65 + abs(net_fast) * 60.0)
             phase = "BREAKOUT" if abs(net_fast) < 0.005 else "EXTENDED"
@@ -218,6 +217,12 @@ class QuantEngine:
         if abs(net_fast) >= CONFIG.phase_early_move_pct and direction != "NEUTRAL":
             confidence = min(0.95, 0.60 + abs(net_fast) * 80.0)
             return "EARLY_CONFIRMATION", ("BULLISH" if net_fast > 0 else "BEARISH"), confidence
+
+        # Accumulation means both price compression and limited directional drift
+        # across the full 5-minute regime window.
+        if range_pct <= 0.0035 and abs(net_recent) <= 0.0012:
+            confidence = min(0.95, 0.55 + max(0.0, 0.0035 - range_pct) * 60.0)
+            return "ACCUMULATION", direction, confidence
 
         return "TRANSITION", direction, 0.50
 
