@@ -24,6 +24,8 @@ class Config:
     poll_seconds: float = float(os.getenv("POLL_SECONDS", "2"))
     risk_free_rate: float = float(os.getenv("RISK_FREE_RATE", "0.06"))
     dividend_yield: float = float(os.getenv("DIVIDEND_YIELD", "0.01"))
+    phase_early_move_pct: float = float(os.getenv("PHASE_EARLY_MOVE_PCT", "0.0004"))
+    phase_breakout_move_pct: float = float(os.getenv("PHASE_BREAKOUT_MOVE_PCT", "0.0008"))
     # QuantNifty session policy: no new entries before 09:30 or after 15:15;
     # force all positions flat from 15:10 onward.
     start_time: time = time(9, 30)
