@@ -214,9 +214,12 @@ class QuantEngine:
             phase = "BREAKOUT" if abs(net_fast) < 0.005 else "EXTENDED"
             return phase, ("BULLISH" if net_fast > 0 else "BEARISH"), confidence
 
-        if abs(net_fast) >= CONFIG.phase_early_move_pct and direction != "NEUTRAL":
+        fast_direction = "BULLISH" if net_fast > CONFIG.phase_early_move_pct else (
+            "BEARISH" if net_fast < -CONFIG.phase_early_move_pct else "NEUTRAL"
+        )
+        if abs(net_fast) >= CONFIG.phase_early_move_pct and fast_direction != "NEUTRAL":
             confidence = min(0.95, 0.60 + abs(net_fast) * 80.0)
-            return "EARLY_CONFIRMATION", ("BULLISH" if net_fast > 0 else "BEARISH"), confidence
+            return "EARLY_CONFIRMATION", fast_direction, confidence
 
         # Accumulation means both price compression and limited directional drift
         # across the full 5-minute regime window.
