@@ -77,3 +77,47 @@ def test_market_phase_early_threshold_is_not_28_points_per_minute():
     assert phase == "EARLY_CONFIRMATION"
     assert direction == "BULLISH"
     assert confidence > 0.5
+
+
+def _option(strike=100.0, option_type="CE", ltp=10.0, bid=9.9, ask=10.1, iv=20.0):
+    return OptionQuote(
+        strike, option_type, "1", f"NIFTY{strike:g}{option_type}",
+        ltp, bid, ask, 1000, 10000, 9000, iv,
+        lot_size=75,
+    )
+
+
+def test_diagnostic_blocks_accumulation_before_ev():
+    state = MarketState(spot=100.0, expiry="2026-09-22")
+    state.spot_history = [100.0 + (0.02 * (i % 4)) for i in range(80)]
+    q = _option()
+    signal, reason, metrics = QuantEngine.evaluate_diagnostic(state, q, 5.0)
+    assert signal is None
+    assert reason == "MARKET_PHASE_WAIT"
+    assert "expected_value" not in metrics
+
+
+def test_best_signal_reports_rejection_counts():
+    state = MarketState(spot=100.0, expiry="2026-09-22")
+    state.spot_history = [100.0 + (0.05 * i / 30) for i in range(31)]
+    state.options = {
+        state.key(100, "CE"): _option(),
+        state.key(100, "PE"): _option(option_type="PE"),
+    }
+    from app.models import SignalAudit
+    audit = SignalAudit()
+    signal = QuantEngine.best_signal(state, 10.0, audit=audit)
+    assert signal is None
+    assert audit.total_options == 2
+    assert audit.evaluated == 2
+    assert audit.rejected
+    assert audit.phase == "EARLY_CONFIRMATION"
+
+
+def test_market_state_set_spot_updates_timestamp_and_deduplicates():
+    state = MarketState()
+    now = datetime.now()
+    state.set_spot(100.0, now)
+    state.set_spot(100.0, now)
+    assert state.timestamp == now
+    assert state.spot_history == [100.0]
