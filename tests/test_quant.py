@@ -71,7 +71,8 @@ def test_black_scholes_price_is_positive():
 
 def test_market_phase_early_threshold_is_not_28_points_per_minute():
     state = MarketState(spot=100.0)
-    state.spot_history = [100.0] * 120 + [100.05]
+    # 31 unique observations represent about one minute at a 2-second poll.
+    state.spot_history = [100.0 + (0.05 * i / 30) for i in range(31)]
     phase, direction, confidence = QuantEngine.market_phase(state)
     assert phase == "EARLY_CONFIRMATION"
     assert direction == "BULLISH"
