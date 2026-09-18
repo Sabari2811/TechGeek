@@ -129,15 +129,23 @@ async def run():
             if not signal:
                 phase, direction, confidence = QuantEngine.market_phase(state)
                 points = len(QuantEngine._unique_prices(state.spot_history))
-                reason_text = (
-                    f"No candidate meets minimum net EV ₹{CONFIG.min_net_ev:.2f} | "
-                    f"phase={phase} direction={direction} confidence={confidence:.2f} "
-                    f"spot_points={points}"
-                )
+                phase_pass = phase in {"EARLY_CONFIRMATION", "BREAKOUT"}
+                if not phase_pass:
+                    reason_text = (
+                        f"Market phase gate is blocking candidates | phase={phase} "
+                        f"direction={direction} confidence={confidence:.2f} "
+                        f"spot_points={points} | EV is not evaluated for entry until phase confirms"
+                    )
+                else:
+                    reason_text = (
+                        f"No candidate meets minimum net EV ₹{CONFIG.min_net_ev:.2f} | "
+                        f"phase={phase} direction={direction} confidence={confidence:.2f} "
+                        f"spot_points={points}"
+                    )
                 Terminal.waiting(state.spot, reason_text, {
                     "Session / risk": True,
-                    "Minimum net EV": False,
-                    "Market phase": phase in {"EARLY_CONFIRMATION", "BREAKOUT"},
+                    "Market phase": phase_pass,
+                    "Minimum net EV": phase_pass,
                     "Spot history": points >= 12,
                 })
                 await asyncio.sleep(CONFIG.poll_seconds)
