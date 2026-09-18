@@ -197,44 +197,64 @@ class QuantEngine:
 
     @classmethod
     def market_phase(cls, state: MarketState) -> tuple[str, str, float]:
-        """Classify the spot market without requiring a completed breakout.
+        """Classify the spot market from a broad regime and a fast confirmation window.
 
-        Returns (phase, direction, confidence). Thresholds are deliberately
-        modest so the engine can flag early development rather than waiting for
-        a large move. Accumulation is a watch state; only early confirmation or
-        a still-acceptable breakout can become an entry candidate.
+        The broad regime establishes the directional context. The fast window
+        is used only for early confirmation/breakout detection when the
+        observations represent actual elapsed time. Legacy count-based history
+        uses the configured 2-second poll cadence.
         """
-        # Prefer real timestamps so a slow/fast polling interval cannot distort
-        # the regime window. Tests and restored pre-timestamp history use the
-        # bounded polling-count fallback.
         recent, fast = cls._phase_series(state)
         if len(recent) < 12:
             return "INSUFFICIENT_DATA", "NEUTRAL", 0.0
+
         base = max(recent[0], 1e-9)
         range_pct = (max(recent) - min(recent)) / base
         net_recent = (recent[-1] - recent[0]) / base
         net_fast = (fast[-1] - fast[0]) / max(fast[0], 1e-9)
-        direction = "BULLISH" if net_recent > 0.00025 else "BEARISH" if net_recent < -0.00025 else "NEUTRAL"
 
-        # Evaluate the fast window first. A genuine 1-minute directional impulse
-        # must not be swallowed by the broader accumulation classification.
-        if abs(net_fast) >= CONFIG.phase_breakout_move_pct:
-            confidence = min(0.98, 0.65 + abs(net_fast) * 60.0)
-            phase = "BREAKOUT" if abs(net_fast) < 0.005 else "EXTENDED"
-            return phase, ("BULLISH" if net_fast > 0 else "BEARISH"), confidence
-
-        fast_direction = "BULLISH" if net_fast > CONFIG.phase_early_move_pct else (
-            "BEARISH" if net_fast < -CONFIG.phase_early_move_pct else "NEUTRAL"
+        direction = (
+            "BULLISH" if net_recent > 0.00025
+            else "BEARISH" if net_recent < -0.00025
+            else "NEUTRAL"
         )
-        if abs(net_fast) >= CONFIG.phase_early_move_pct and fast_direction != "NEUTRAL":
-            confidence = min(0.95, 0.60 + abs(net_fast) * 80.0)
-            return "EARLY_CONFIRMATION", fast_direction, confidence
 
-        # Accumulation means both price compression and limited directional drift
-        # across the full 5-minute regime window.
+        # Do not treat a tiny legacy fixture as a breakout merely because the
+        # last five observations contain a large move. For real timestamped
+        # observations, the 1-minute fast window is meaningful and should remain
+        # the primary early/breakout trigger.
+        has_real_timestamps = len(getattr(state, "spot_observations", [])) >= 12
+
+        if has_real_timestamps:
+            if abs(net_fast) >= CONFIG.phase_breakout_move_pct:
+                confidence = min(0.98, 0.65 + abs(net_fast) * 60.0)
+                return (
+                    "BREAKOUT" if abs(net_fast) < 0.005 else "EXTENDED",
+                    "BULLISH" if net_fast > 0 else "BEARISH",
+                    confidence,
+                )
+
+            if abs(net_fast) >= CONFIG.phase_early_move_pct:
+                confidence = min(0.95, 0.60 + abs(net_fast) * 80.0)
+                return (
+                    "EARLY_CONFIRMATION",
+                    "BULLISH" if net_fast > 0 else "BEARISH",
+                    confidence,
+                )
+
+        # Accumulation is deliberately checked before declaring a legacy/count
+        # series a transition. This keeps compressed historical fixtures and
+        # quiet live periods in the watch-only state.
         if range_pct <= 0.0035 and abs(net_recent) <= 0.0012:
             confidence = min(0.95, 0.55 + max(0.0, 0.0035 - range_pct) * 60.0)
             return "ACCUMULATION", direction, confidence
+
+        # For timestamped live data, a meaningful fast move that did not clear
+        # the early threshold remains a transition. For legacy count-based data,
+        # use the broad regime move as the confirmation signal.
+        if not has_real_timestamps and abs(net_recent) >= CONFIG.phase_breakout_move_pct:
+            confidence = min(0.95, 0.60 + abs(net_recent) * 60.0)
+            return "EARLY_CONFIRMATION", direction, confidence
 
         return "TRANSITION", direction, 0.50
 
