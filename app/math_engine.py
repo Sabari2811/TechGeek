@@ -197,7 +197,12 @@ class QuantEngine:
 
     @classmethod
     def market_phase(cls, state: MarketState) -> tuple[str, str, float]:
-        """Classify spot into accumulation, early confirmation, breakout/extended, or transition."""
+        """Classify spot using elapsed-time windows when timestamps exist.
+
+        Untimestamped history is legacy/test data, so it is interpreted by the
+        shape of the available series rather than pretending every point is a
+        live 2-second observation.
+        """
         recent, fast = cls._phase_series(state)
         if len(recent) < 12:
             return "INSUFFICIENT_DATA", "NEUTRAL", 0.0
@@ -234,28 +239,28 @@ class QuantEngine:
                 return "ACCUMULATION", direction, confidence
             return "TRANSITION", direction, 0.50
 
-        # Legacy histories have no timestamps. Use explicit length/regime-shape
-        # rules so tests/restored history are not mistaken for elapsed-time ticks.
         history_len = len(recent)
+        poll_seconds = max(CONFIG.poll_seconds, 0.5)
+        fast_points = max(5, min(60, round(60.0 / poll_seconds)))
 
-        # Compact short history: accumulation when compressed, otherwise classify
-        # the sustained drift using its total move.
+        # Compact 12-point histories are classified from their overall shape.
+        # A narrow range with small net drift is accumulation.
         if history_len <= 16:
             if range_pct <= 0.0035 and abs(net_recent) <= 0.0012:
                 confidence = min(0.95, 0.55 + max(0.0, 0.0035 - range_pct) * 60.0)
                 return "ACCUMULATION", direction, confidence
 
+            # Sustained directional move over the compact history is early
+            # confirmation; this keeps short legacy fixtures meaningful.
             if abs(net_recent) >= CONFIG.phase_early_move_pct:
                 confidence = min(0.95, 0.60 + abs(net_recent) * 80.0)
                 return "EARLY_CONFIRMATION", direction, confidence
 
             return "TRANSITION", direction, 0.50
 
-        # A longer legacy series can represent elapsed polling. Use its last
-        # configured minute as a fast confirmation window.
-        poll_seconds = max(CONFIG.poll_seconds, 0.5)
-        fast_points = max(5, min(60, round(60.0 / poll_seconds)))
-        if history_len >= fast_points * 2:
+        # For longer untimestamped histories, a full one-minute move only counts
+        # as confirmation when there is enough history to establish that window.
+        if history_len >= fast_points:
             legacy_fast = recent[-fast_points:]
             legacy_fast_move = (legacy_fast[-1] - legacy_fast[0]) / max(legacy_fast[0], 1e-9)
             if abs(legacy_fast_move) >= CONFIG.phase_breakout_move_pct:
