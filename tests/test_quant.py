@@ -61,3 +61,18 @@ def test_market_phase_uses_multi_minute_regime_window():
     assert phase == "TRANSITION"
     assert direction == "BULLISH"
     assert confidence == 0.50
+
+
+
+def test_black_scholes_price_is_positive():
+    price = QuantEngine.black_scholes_price(23300, 23300, 0.10, "CE", "2026-09-22")
+    assert price > 0
+
+
+def test_market_phase_early_threshold_is_not_28_points_per_minute():
+    state = MarketState(spot=100.0)
+    state.spot_history = [100.0] * 120 + [100.05]
+    phase, direction, confidence = QuantEngine.market_phase(state)
+    assert phase == "EARLY_CONFIRMATION"
+    assert direction == "BULLISH"
+    assert confidence > 0.5
