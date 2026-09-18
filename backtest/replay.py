@@ -35,7 +35,11 @@ def replay_file(path: str | Path, min_net_ev: float = 10.0) -> ReplaySummary:
     for row in records:
         summary.snapshots += 1
         data = row["data"]
-        load_chain_into_state(state, data)
+        try:
+            timestamp = datetime.fromisoformat(str(row.get("timestamp", "")))
+        except (TypeError, ValueError):
+            timestamp = None
+        load_chain_into_state(state, data, timestamp=timestamp)
         if not state.options:
             continue
         summary.option_snapshots += 1
