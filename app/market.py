@@ -299,10 +299,10 @@ def _num(raw: dict, *names: str) -> float:
     return 0.0
 
 
-def load_chain_into_state(state: MarketState, data: dict):
+def load_chain_into_state(state: MarketState, data: dict, timestamp: datetime | None = None):
     spot = _num(data, "underlying_ltp")
     state.expiry = data.get("expiry")
-    timestamp = datetime.now(IST)
+    timestamp = timestamp or datetime.now(IST)
     state.set_spot(spot, timestamp)
     for strike_text, legs in data.get("strikes", {}).items():
         strike = float(strike_text)
