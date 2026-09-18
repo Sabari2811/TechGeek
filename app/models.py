@@ -64,6 +64,44 @@ class MarketState:
         return self.options.get(self.key(strike, option_type))
 
 
+
+@dataclass
+class SignalAudit:
+    total_options: int = 0
+    calls: int = 0
+    puts: int = 0
+    rejected: Dict[str, int] = field(default_factory=dict)
+    best_rejected_reason: str = ""
+    best_rejected_symbol: str = ""
+    best_rejected_net_ev: float = float("-inf")
+    best_rejected_probability: float = 0.0
+    best_rejected_phase: str = "UNKNOWN"
+    best_rejected_direction: str = "NEUTRAL"
+    phase: str = "UNKNOWN"
+    phase_direction: str = "NEUTRAL"
+    phase_confidence: float = 0.0
+    spot_points: int = 0
+    fast_move_pct: float = 0.0
+    regime_move_pct: float = 0.0
+    regime_range_pct: float = 0.0
+    evaluated: int = 0
+    eligible_before_min_ev: int = 0
+    final_candidates: int = 0
+
+    def reject(self, reason: str) -> None:
+        self.rejected[reason] = self.rejected.get(reason, 0) + 1
+
+    @property
+    def blocking_reason(self) -> str:
+        if self.final_candidates:
+            return "SIGNAL_READY"
+        if self.phase not in {"EARLY_CONFIRMATION", "BREAKOUT"}:
+            return "MARKET_PHASE"
+        if self.rejected:
+            return max(self.rejected.items(), key=lambda item: item[1])[0]
+        return "NO_VALID_OPTION"
+
+
 @dataclass
 class TradeSignal:
     action: str
