@@ -314,6 +314,9 @@ def load_chain_into_state(state: MarketState, data: dict):
                 strike, option_type, str(raw.get("security_id","")), str(raw.get("trading_symbol","")),
                 _num(raw,"last_price"), _num(raw,"top_bid_price","bid_price"), _num(raw,"top_ask_price","ask_price"),
                 _num(raw,"volume"), _num(raw,"oi"), _num(raw,"previous_oi"), _num(raw,"iv"),
-                _num(raw,"delta"), _num(raw,"gamma"), _num(raw,"theta"), _num(raw,"vega"),
+                _num(raw.get("greeks", {}) if isinstance(raw.get("greeks"), dict) else raw,"delta"),
+                _num(raw.get("greeks", {}) if isinstance(raw.get("greeks"), dict) else raw,"gamma"),
+                _num(raw.get("greeks", {}) if isinstance(raw.get("greeks"), dict) else raw,"theta"),
+                _num(raw.get("greeks", {}) if isinstance(raw.get("greeks"), dict) else raw,"vega"),
                 int(_num(raw,"lot_size")) if _num(raw,"lot_size") > 0 else 1)
             state.options[state.key(strike, option_type)] = q
