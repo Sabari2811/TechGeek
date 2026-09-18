@@ -191,7 +191,7 @@ class QuantEngine:
         poll_seconds = max(CONFIG.poll_seconds, 0.5)
         regime_points = max(12, min(150, round(300.0 / poll_seconds)))
         fast_points = max(5, min(60, round(60.0 / poll_seconds)))
-        prices = cls._unique_prices(state.spot_history)[-regime_points:]
+        prices = QuantEngine._unique_prices(state.spot_history)[-regime_points:]
         return prices, prices[-min(fast_points, len(prices)):]
 
 
@@ -247,9 +247,9 @@ class QuantEngine:
                 "spot_points": len(recent), "fast_move_pct": 0.0,
                 "regime_move_pct": 0.0, "regime_range_pct": 0.0,
             }
-        base = max(prices[0], 1e-9)
+        base = max(recent[0], 1e-9)
         return {
-            "spot_points": len(prices),
+            "spot_points": len(recent),
             "fast_move_pct": (fast[-1] - fast[0]) / max(fast[0], 1e-9),
             "regime_move_pct": (prices[-1] - prices[0]) / base,
             "regime_range_pct": (max(prices) - min(prices)) / base,
