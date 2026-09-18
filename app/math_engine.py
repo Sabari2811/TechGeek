@@ -319,8 +319,6 @@ class QuantEngine:
 
         if net_ev < 0:
             return None, "NEGATIVE_NET_EV", metrics
-        if net_ev < 0:
-            return None, "NEGATIVE_NET_EV", metrics
 
         components = cls._score_components(mispricing, probability, iv, rv, q.oi_change, q.oi, q.volume, q.delta)
         score = cls._score(components, learner)
