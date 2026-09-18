@@ -300,12 +300,10 @@ def _num(raw: dict, *names: str) -> float:
 
 
 def load_chain_into_state(state: MarketState, data: dict):
-    state.spot = _num(data, "underlying_ltp")
+    spot = _num(data, "underlying_ltp")
     state.expiry = data.get("expiry")
-    state.timestamp = datetime.now(IST)
-    if state.spot > 0:
-        state.spot_history.append(state.spot)
-        if len(state.spot_history) > 600: state.spot_history.pop(0)
+    timestamp = datetime.now(IST)
+    state.set_spot(spot, timestamp)
     for strike_text, legs in data.get("strikes", {}).items():
         strike = float(strike_text)
         for option_type, raw in (("CE", legs.get("ce")), ("PE", legs.get("pe"))):
