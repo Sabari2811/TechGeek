@@ -1,7 +1,7 @@
 import asyncio
 from datetime import datetime
 from .config import CONFIG, IST
-from .models import MarketState
+from .models import MarketState, SignalAudit
 from .market import IndstocksClient, load_chain_into_state, extract_market_depth, summarize_market_depth_payload
 from .math_engine import QuantEngine
 from .microstructure import MicrostructureEngine, MicrostructureState
@@ -9,6 +9,7 @@ from .risk import RiskManager
 from .execution import ExecutionEngine
 from .learning import IncrementalLearner
 from .session_state import load_today, save_today
+from .raw_data import record_option_chain
 from .terminal import Terminal
 
 
@@ -65,6 +66,7 @@ async def run():
                 if expiry is None:
                     expiry = await next_expiry(client)
                 chain = await client.option_chain(expiry)
+                record_option_chain(chain, expiry=expiry)
                 load_chain_into_state(state, chain)
                 save_today(state.spot_history, today)
             except Exception as exc:
@@ -125,29 +127,10 @@ async def run():
                 await asyncio.sleep(CONFIG.poll_seconds)
                 continue
 
-            signal = QuantEngine.best_signal(state, CONFIG.min_net_ev, learner=learning)
+            audit = SignalAudit()
+            signal = QuantEngine.best_signal(state, CONFIG.min_net_ev, learner=learning, audit=audit)
             if not signal:
-                phase, direction, confidence = QuantEngine.market_phase(state)
-                points = len(QuantEngine._unique_prices(state.spot_history))
-                phase_pass = phase in {"EARLY_CONFIRMATION", "BREAKOUT"}
-                if not phase_pass:
-                    reason_text = (
-                        f"Market phase gate is blocking candidates | phase={phase} "
-                        f"direction={direction} confidence={confidence:.2f} "
-                        f"spot_points={points} | EV is not evaluated for entry until phase confirms"
-                    )
-                else:
-                    reason_text = (
-                        f"No candidate meets minimum net EV ₹{CONFIG.min_net_ev:.2f} | "
-                        f"phase={phase} direction={direction} confidence={confidence:.2f} "
-                        f"spot_points={points}"
-                    )
-                Terminal.waiting(state.spot, reason_text, {
-                    "Session / risk": True,
-                    "Market phase": phase_pass,
-                    "Minimum net EV": phase_pass,
-                    "Spot history": points >= 12,
-                })
+                Terminal.waiting_audit(state.spot, audit, CONFIG.min_net_ev)
                 await asyncio.sleep(CONFIG.poll_seconds)
                 continue
 
