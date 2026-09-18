@@ -143,3 +143,35 @@ A stop price is not a guaranteed maximum loss during gaps or illiquidity. This i
 ## Important
 
 This software is an engineering/research system, not a promise of profitability. The current fair-value component is a conservative research baseline, not a calibrated production option-pricing model. Model Greeks are estimates and should not be treated as broker/exchange Greeks. Microstructure signals are inference from public market-depth snapshots, not proof of institutional activity. Every quantitative rule must be validated out of sample with realistic fees and slippage before live use.
+
+## Decision Audit & Post-Market Replay
+
+QuantNifty now records each successful option-chain response locally under
+`.quantnifty/raw/YYYY-MM-DD.jsonl`. The files are git-ignored and contain no
+broker credentials. This makes a live session reproducible without calling the
+broker during replay.
+
+During a WAIT state the terminal reports:
+- market phase, direction, confidence, 1-minute move and 5-minute move/range
+- option-contract counts
+- exact rejection reasons and counts
+- the best rejected contract and its probability/net EV when those values were reached
+- the actual blocking stage
+
+Regime gates are evaluated before fair value, probability and EV, so the audit
+does not claim that EV was evaluated while the market was still in accumulation
+or directionally misaligned.
+
+Replay a captured session after market close:
+
+```powershell
+python -m backtest.replay .quantnifty/raw/2026-09-18.jsonl --min-net-ev 10
+```
+
+The replay uses the same deterministic quantitative engine and never places
+orders. It reports how many snapshots produced candidates and which rejection
+reasons dominated.
+
+Raw capture is enabled by default in the live loop. Existing terminal output
+from a previous session cannot be reconstructed into option-chain history if the
+raw snapshots were not captured at that time.
