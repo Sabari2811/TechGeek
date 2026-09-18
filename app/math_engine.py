@@ -112,16 +112,33 @@ class QuantEngine:
         q.vega = greeks["vega"]
 
     @classmethod
+    def black_scholes_price(cls, spot: float, strike: float, vol: float,
+                            option_type: str, expiry: str,
+                            risk_free_rate: float | None = None,
+                            dividend_yield: float | None = None) -> float:
+        sigma = vol / 100.0 if vol > 1.0 else vol
+        t = cls.time_to_expiry(expiry)
+        if spot <= 0 or strike <= 0 or sigma <= 0 or t <= 0:
+            return cls.intrinsic(spot, strike, option_type)
+
+        r = CONFIG.risk_free_rate if risk_free_rate is None else risk_free_rate
+        q = CONFIG.dividend_yield if dividend_yield is None else dividend_yield
+        sqrt_t = math.sqrt(t)
+        d1 = (math.log(spot / strike) + (r - q + 0.5 * sigma * sigma) * t) / (sigma * sqrt_t)
+        d2 = d1 - sigma * sqrt_t
+        disc_q = math.exp(-q * t)
+        disc_r = math.exp(-r * t)
+        if option_type.upper() == "CE":
+            return spot * disc_q * cls.normal_cdf(d1) - strike * disc_r * cls.normal_cdf(d2)
+        return strike * disc_r * cls.normal_cdf(-d2) - spot * disc_q * cls.normal_cdf(-d1)
+
+    @classmethod
     def fair_value_proxy(cls, state: MarketState, q: OptionQuote) -> float:
+        """Research fair value using IV/RV and full time-to-expiry."""
         rv = cls.realized_vol(state.spot_history)
         iv = q.iv / 100.0 if q.iv > 1 else q.iv
         vol = max(iv, rv, 0.05)
-        distance = abs(state.spot - q.strike)
-        time_factor = math.sqrt(30 / (252 * 375))
-        time_value = state.spot * vol * time_factor * 0.40
-        return cls.intrinsic(state.spot, q.strike, q.option_type) + time_value * math.exp(
-            -distance / max(state.spot * 0.02, 1)
-        )
+        return cls.black_scholes_price(state.spot, q.strike, vol, q.option_type, state.expiry or "")
 
     @staticmethod
     def _score_components(mispricing: float, probability: float, iv: float, rv: float,
@@ -193,12 +210,12 @@ class QuantEngine:
 
         # Confirm acceleration over roughly one minute rather than five polling
         # observations (~10 seconds at the default poll interval).
-        if abs(net_fast) >= 0.0025:
+        if abs(net_fast) >= CONFIG.phase_breakout_move_pct:
             confidence = min(0.98, 0.65 + abs(net_fast) * 60.0)
             phase = "BREAKOUT" if abs(net_fast) < 0.005 else "EXTENDED"
             return phase, ("BULLISH" if net_fast > 0 else "BEARISH"), confidence
 
-        if abs(net_fast) >= 0.0012 and direction != "NEUTRAL":
+        if abs(net_fast) >= CONFIG.phase_early_move_pct and direction != "NEUTRAL":
             confidence = min(0.95, 0.60 + abs(net_fast) * 80.0)
             return "EARLY_CONFIRMATION", ("BULLISH" if net_fast > 0 else "BEARISH"), confidence
 
