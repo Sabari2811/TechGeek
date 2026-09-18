@@ -44,6 +44,7 @@ class MarketState:
     expiry: Optional[str] = None
     options: Dict[str, OptionQuote] = field(default_factory=dict)
     spot_history: list[float] = field(default_factory=list)
+    spot_observations: list[tuple[datetime, float]] = field(default_factory=list)
     last_tick_epoch_ms: int = 0
 
     def set_spot(self, price: float, timestamp: datetime) -> None:
@@ -54,8 +55,11 @@ class MarketState:
             # independent price movement in the pre-breakout detector.
             if not self.spot_history or self.spot_history[-1] != price:
                 self.spot_history.append(price)
+                self.spot_observations.append((timestamp, price))
                 if len(self.spot_history) > 600:
                     self.spot_history.pop(0)
+                if len(self.spot_observations) > 600:
+                    self.spot_observations.pop(0)
 
     def key(self, strike: float, option_type: str) -> str:
         return f"{strike:.2f}:{option_type.upper()}"
