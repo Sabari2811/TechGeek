@@ -99,6 +99,8 @@ class SignalAudit:
     def blocking_reason(self) -> str:
         if self.final_candidates:
             return "SIGNAL_READY"
+        if self.total_options == 0:
+            return "NO_OPTION_CONTRACTS"
         if self.phase not in {"EARLY_CONFIRMATION", "BREAKOUT"}:
             return "MARKET_PHASE"
         if self.rejected:
