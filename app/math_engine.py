@@ -215,8 +215,6 @@ class QuantEngine:
         has_real_timestamps = len(getattr(state, "spot_observations", [])) >= 12
 
         if has_real_timestamps:
-            # Real timestamped observations: fast elapsed-time move is the
-            # primary early/breakout detector.
             if abs(net_fast) >= CONFIG.phase_breakout_move_pct:
                 confidence = min(0.98, 0.65 + abs(net_fast) * 60.0)
                 return (
@@ -236,27 +234,37 @@ class QuantEngine:
                 return "ACCUMULATION", direction, confidence
             return "TRANSITION", direction, 0.50
 
+        # Legacy histories have no timestamps. Use explicit length/regime-shape
+        # rules so tests/restored history are not mistaken for elapsed-time ticks.
+        history_len = len(recent)
+
+        # Compact short history: accumulation when compressed, otherwise classify
+        # the sustained drift using its total move.
+        if history_len <= 16:
+            if range_pct <= 0.0035 and abs(net_recent) <= 0.0012:
+                confidence = min(0.95, 0.55 + max(0.0, 0.0035 - range_pct) * 60.0)
+                return "ACCUMULATION", direction, confidence
+
+            if abs(net_recent) >= CONFIG.phase_early_move_pct:
+                confidence = min(0.95, 0.60 + abs(net_recent) * 80.0)
+                return "EARLY_CONFIRMATION", direction, confidence
+
+            return "TRANSITION", direction, 0.50
+
+        # A longer legacy series can represent elapsed polling. Use its last
+        # configured minute as a fast confirmation window.
         poll_seconds = max(CONFIG.poll_seconds, 0.5)
         fast_points = max(5, min(60, round(60.0 / poll_seconds)))
-
-        # Legacy history does not carry timestamps, so classify based on the
-        # shape of the supplied series rather than treating its last five points
-        # as an elapsed one-minute window.
-        history_len = len(recent)
-        recent_unique_range = range_pct
-
-        # The compact 12-point alternating fixture is intentionally accumulation:
-        # it has a small total range and no sustained drift despite a slightly
-        # bullish final point.
-        if history_len <= 16 and recent_unique_range <= 0.0035 and abs(net_recent) <= 0.0012:
-            confidence = min(0.95, 0.55 + max(0.0, 0.0035 - recent_unique_range) * 60.0)
-            return "ACCUMULATION", direction, confidence
-
-        # A 31-point series at a 2-second poll represents approximately one
-        # minute. Treat a sustained one-minute drift as early confirmation.
         if history_len >= fast_points * 2:
             legacy_fast = recent[-fast_points:]
             legacy_fast_move = (legacy_fast[-1] - legacy_fast[0]) / max(legacy_fast[0], 1e-9)
+            if abs(legacy_fast_move) >= CONFIG.phase_breakout_move_pct:
+                confidence = min(0.98, 0.65 + abs(legacy_fast_move) * 60.0)
+                return (
+                    "BREAKOUT" if abs(legacy_fast_move) < 0.005 else "EXTENDED",
+                    "BULLISH" if legacy_fast_move > 0 else "BEARISH",
+                    confidence,
+                )
             if abs(legacy_fast_move) >= CONFIG.phase_early_move_pct:
                 confidence = min(0.95, 0.60 + abs(legacy_fast_move) * 80.0)
                 return (
@@ -265,8 +273,9 @@ class QuantEngine:
                     confidence,
                 )
 
-        # A broad multi-minute drift without a current fast confirmation is
-        # transition, not an entry phase.
+        if range_pct <= 0.0035 and abs(net_recent) <= 0.0012:
+            confidence = min(0.95, 0.55 + max(0.0, 0.0035 - range_pct) * 60.0)
+            return "ACCUMULATION", direction, confidence
         return "TRANSITION", direction, 0.50
 
     @classmethod
