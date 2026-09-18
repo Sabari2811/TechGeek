@@ -50,3 +50,14 @@ def test_set_spot_deduplicates_polling_observations():
     state.set_spot(100.0, now)
     state.set_spot(100.1, now)
     assert state.spot_history == [100.0, 100.1]
+
+
+def test_market_phase_uses_multi_minute_regime_window():
+    state = MarketState(spot=100.0)
+    # Simulate a 5-minute, ~0.16% upward drift with a quiet final minute.
+    state.spot_history = [100.0 + (0.16 * i / 149) for i in range(150)]
+    state.spot_history.extend([100.16, 100.16, 100.16, 100.16, 100.16])
+    phase, direction, confidence = QuantEngine.market_phase(state)
+    assert phase == "TRANSITION"
+    assert direction == "BULLISH"
+    assert confidence == 0.50

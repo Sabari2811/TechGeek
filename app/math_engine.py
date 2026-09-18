@@ -163,22 +163,36 @@ class QuantEngine:
         a large move. Accumulation is a watch state; only early confirmation or
         a still-acceptable breakout can become an entry candidate.
         """
-        prices = cls._unique_prices(state.spot_history)[-60:]
+        # Spot observations are deduplicated and arrive roughly every poll interval.
+        # The old 12/5-point windows therefore represented only ~24/~10 seconds at
+        # the default 2-second poll rate. That made a multi-minute move look like
+        # "ACCUMULATION" whenever the last few seconds were quiet. Use a stable
+        # time-based approximation instead: 5 minutes for regime/direction and
+        # 1 minute for acceleration/confirmation.
+        poll_seconds = max(CONFIG.poll_seconds, 0.5)
+        regime_points = max(12, min(150, round(300.0 / poll_seconds)))
+        fast_points = max(5, min(60, round(60.0 / poll_seconds)))
+        prices = cls._unique_prices(state.spot_history)[-regime_points:]
         if len(prices) < 12:
             return "INSUFFICIENT_DATA", "NEUTRAL", 0.0
 
-        recent = prices[-12:]
-        fast = prices[-5:]
+        recent = prices
+        fast = prices[-min(fast_points, len(prices)):]
         base = max(recent[0], 1e-9)
         range_pct = (max(recent) - min(recent)) / base
         net_recent = (recent[-1] - recent[0]) / base
         net_fast = (fast[-1] - fast[0]) / max(fast[0], 1e-9)
         direction = "BULLISH" if net_recent > 0.00025 else "BEARISH" if net_recent < -0.00025 else "NEUTRAL"
 
-        if range_pct <= 0.0035 and abs(net_recent) <= 0.0020:
+        # Accumulation means both price compression and limited directional drift
+        # across the full 5-minute regime window. A quiet last few seconds must not
+        # erase a meaningful multi-minute move.
+        if range_pct <= 0.0035 and abs(net_recent) <= 0.0012:
             confidence = min(0.95, 0.55 + max(0.0, 0.0035 - range_pct) * 60.0)
             return "ACCUMULATION", direction, confidence
 
+        # Confirm acceleration over roughly one minute rather than five polling
+        # observations (~10 seconds at the default poll interval).
         if abs(net_fast) >= 0.0025:
             confidence = min(0.98, 0.65 + abs(net_fast) * 60.0)
             phase = "BREAKOUT" if abs(net_fast) < 0.005 else "EXTENDED"
