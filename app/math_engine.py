@@ -3,7 +3,7 @@ from statistics import pstdev
 from datetime import datetime, time
 from zoneinfo import ZoneInfo
 from .config import CONFIG
-from .models import MarketState, OptionQuote, TradeSignal
+from .models import MarketState, OptionQuote, TradeSignal, SignalAudit
 
 IST = ZoneInfo("Asia/Kolkata")
 
@@ -229,18 +229,50 @@ class QuantEngine:
 
         return "TRANSITION", direction, 0.50
 
+
     @classmethod
-    def evaluate(cls, state: MarketState, q: OptionQuote, risk_per_share: float,
-                 target_multiple: float = 1.8, learner=None) -> TradeSignal | None:
-        if q.ltp <= 0 or q.bid <= 0 or q.ask <= 0 or q.spread_pct > 0.04:
-            return None
+    def phase_metrics(cls, state: MarketState) -> dict[str, float | int | str]:
+        poll_seconds = max(CONFIG.poll_seconds, 0.5)
+        regime_points = max(12, min(150, round(300.0 / poll_seconds)))
+        fast_points = max(5, min(60, round(60.0 / poll_seconds)))
+        prices = cls._unique_prices(state.spot_history)[-regime_points:]
+        if len(prices) < 12:
+            return {
+                "spot_points": len(prices), "fast_move_pct": 0.0,
+                "regime_move_pct": 0.0, "regime_range_pct": 0.0,
+            }
+        fast = prices[-min(fast_points, len(prices)):]
+        base = max(prices[0], 1e-9)
+        return {
+            "spot_points": len(prices),
+            "fast_move_pct": (fast[-1] - fast[0]) / max(fast[0], 1e-9),
+            "regime_move_pct": (prices[-1] - prices[0]) / base,
+            "regime_range_pct": (max(prices) - min(prices)) / base,
+        }
+
+    @classmethod
+    def evaluate_diagnostic(cls, state: MarketState, q: OptionQuote, risk_per_share: float,
+                            target_multiple: float = 1.8, learner=None) -> tuple[TradeSignal | None, str, dict]:
+        metrics = cls.phase_metrics(state)
+        phase, direction, phase_confidence = cls.market_phase(state)
+        metrics.update({"phase": phase, "direction": direction, "phase_confidence": phase_confidence})
+
+        if q.ltp <= 0:
+            return None, "INVALID_LTP", metrics
+        if q.bid <= 0 or q.ask <= 0:
+            return None, "INVALID_BID_ASK", metrics
+        if q.spread_pct > CONFIG.max_spread_pct:
+            return None, "SPREAD_TOO_WIDE", metrics
 
         cls.ensure_greeks(state, q)
-        phase, direction, phase_confidence = cls.market_phase(state)
         fair = cls.fair_value_proxy(state, q)
         rv = cls.realized_vol(state.spot_history)
         iv = q.iv / 100.0 if q.iv > 1 else q.iv
+        if iv <= 0:
+            return None, "IV_MISSING", metrics
         vol = max(rv, iv, 0.05)
+        if rv <= 0:
+            return None, "RV_INSUFFICIENT", metrics
 
         now = datetime.now(IST)
         session_start = now.replace(hour=9, minute=30, second=0, microsecond=0)
@@ -250,10 +282,8 @@ class QuantEngine:
         p_spot = cls.probability_above(state.spot, q.strike, vol, minutes)
         if q.option_type == "PE":
             p_spot = 1.0 - p_spot
-
-        # Early-development evidence nudges probability only when direction agrees;
-        # it never creates a signal by itself.
-        if direction == ("BULLISH" if q.option_type == "CE" else "BEARISH"):
+        aligned = "BULLISH" if q.option_type == "CE" else "BEARISH"
+        if direction == aligned:
             p_spot += 0.05 * phase_confidence
         elif direction != "NEUTRAL":
             p_spot -= 0.05 * phase_confidence
@@ -263,6 +293,8 @@ class QuantEngine:
                                     0.20 * max(-0.5, min(0.5, mispricing))))
         if learner:
             probability = learner.probability(probability)
+        if probability < 0.55:
+            return None, "PROBABILITY_BELOW_55", {**metrics, "probability": probability, "fair": fair}
 
         stop = max(q.ltp * 0.75, q.ltp - risk_per_share)
         target = q.ltp + (q.ltp - stop) * target_multiple
@@ -270,8 +302,16 @@ class QuantEngine:
         loss = max(0.0, q.ltp - stop)
         ev = probability * win - (1 - probability) * loss
         net_ev = ev - q.spread * 0.5 - q.ltp * 0.002
+        metrics.update({"probability": probability, "fair": fair, "expected_value": ev, "net_expected_value": net_ev})
+
         if net_ev < 0:
-            return None
+            return None, "NEGATIVE_NET_EV", metrics
+        if phase not in {"EARLY_CONFIRMATION", "BREAKOUT"}:
+            return None, "MARKET_PHASE_WAIT", metrics
+        if direction not in {"NEUTRAL", aligned}:
+            return None, "DIRECTION_MISMATCH", metrics
+        if net_ev < 0:
+            return None, "NEGATIVE_NET_EV", metrics
 
         components = cls._score_components(mispricing, probability, iv, rv, q.oi_change, q.oi, q.volume, q.delta)
         score = cls._score(components, learner)
@@ -283,19 +323,10 @@ class QuantEngine:
             "Volume activity": q.volume > 0,
             "Greeks available": abs(q.delta) > 0 or abs(q.gamma) > 0,
             "Positive net EV": net_ev >= 0,
-            "Spread within limit": q.spread_pct <= 0.04,
-            "Pre-breakout / early phase": phase in {"ACCUMULATION", "EARLY_CONFIRMATION", "BREAKOUT"},
-            "Direction aligned": direction == "NEUTRAL" or direction == ("BULLISH" if q.option_type == "CE" else "BEARISH"),
+            "Spread within limit": q.spread_pct <= CONFIG.max_spread_pct,
+            "Entry phase": phase in {"EARLY_CONFIRMATION", "BREAKOUT"},
+            "Direction aligned": direction == "NEUTRAL" or direction == aligned,
         }
-        # Accumulation alone is never an entry. Early confirmation is the preferred
-        # entry phase; breakout is allowed only if the mathematical edge remains.
-        if phase not in {"EARLY_CONFIRMATION", "BREAKOUT"}:
-            return None
-        if direction not in {"NEUTRAL", "BULLISH" if q.option_type == "CE" else "BEARISH"}:
-            return None
-        if probability < 0.55:
-            return None
-
         return TradeSignal(
             action="BUY", option_type=q.option_type, strike=q.strike,
             security_id=q.security_id, symbol=q.symbol, entry=q.ask,
@@ -305,16 +336,67 @@ class QuantEngine:
                    f"score={score:.1f}/100, prob={probability:.2%}, fair={fair:.2f}, netEV={net_ev:.2f}",
             score=score, checks=checks, score_components=components,
             market_phase=phase, direction_bias=direction,
-        )
+        ), "SIGNAL_READY", metrics
 
     @classmethod
-    def best_signal(cls, state: MarketState, min_net_ev: float, learner=None) -> TradeSignal | None:
+    def evaluate(cls, state: MarketState, q: OptionQuote, risk_per_share: float,
+                 target_multiple: float = 1.8, learner=None) -> TradeSignal | None:
+        signal, _, _ = cls.evaluate_diagnostic(state, q, risk_per_share, target_multiple, learner)
+        return signal
+
+    @classmethod
+    def best_signal(cls, state: MarketState, min_net_ev: float, learner=None,
+                    audit: SignalAudit | None = None) -> TradeSignal | None:
         candidates = []
         risk_per_share = max(5.0, state.spot * 0.001)
+        if audit is not None:
+            audit.total_options = 0
+            audit.calls = audit.puts = 0
+            audit.rejected.clear()
+            audit.best_rejected_reason = ""
+            audit.best_rejected_symbol = ""
+            audit.best_rejected_net_ev = float("-inf")
+            phase, direction, confidence = cls.market_phase(state)
+            audit.phase, audit.phase_direction, audit.phase_confidence = phase, direction, confidence
+            pm = cls.phase_metrics(state)
+            audit.spot_points = int(pm["spot_points"])
+            audit.fast_move_pct = float(pm["fast_move_pct"])
+            audit.regime_move_pct = float(pm["regime_move_pct"])
+            audit.regime_range_pct = float(pm["regime_range_pct"])
+
         for q in state.options.values():
             if q.option_type not in {"CE", "PE"}:
                 continue
-            s = cls.evaluate(state, q, risk_per_share, learner=learner)
-            if s and s.net_expected_value >= min_net_ev:
-                candidates.append(s)
+            if audit is not None:
+                audit.total_options += 1
+                if q.option_type == "CE":
+                    audit.calls += 1
+                else:
+                    audit.puts += 1
+            signal, reason, metrics = cls.evaluate_diagnostic(state, q, risk_per_share, learner=learner)
+            if audit is not None:
+                audit.evaluated += 1
+                audit.reject(reason)
+                candidate_ev = float(metrics.get("net_expected_value", float("-inf")))
+                if candidate_ev > audit.best_rejected_net_ev:
+                    audit.best_rejected_net_ev = candidate_ev
+                    audit.best_rejected_reason = reason
+                    audit.best_rejected_symbol = q.symbol or f"{q.strike:g}{q.option_type}"
+                    audit.best_rejected_probability = float(metrics.get("probability", 0.0))
+                    audit.best_rejected_phase = str(metrics.get("phase", "UNKNOWN"))
+                    audit.best_rejected_direction = str(metrics.get("direction", "NEUTRAL"))
+            if signal:
+                if audit is not None:
+                    audit.eligible_before_min_ev += 1
+                if signal.net_expected_value >= min_net_ev:
+                    candidates.append(signal)
+
+        if audit is not None:
+            audit.final_candidates = len(candidates)
+            if candidates:
+                audit.rejected.pop("SIGNAL_READY", None)
+            if audit.total_options == 0:
+                audit.reject("NO_OPTION_CONTRACTS")
+            elif not candidates:
+                audit.reject("MIN_NET_EV_NOT_MET")
         return max(candidates, key=lambda x: (x.net_expected_value, x.score), default=None)
