@@ -88,6 +88,10 @@ class SignalAudit:
     fast_move_pct: float = 0.0
     regime_move_pct: float = 0.0
     regime_range_pct: float = 0.0
+    fast_range_pct: float = 0.0
+    sign_changes: int = 0
+    early_threshold_pct: float = 0.0
+    breakout_threshold_pct: float = 0.0
     evaluated: int = 0
     eligible_before_min_ev: int = 0
     final_candidates: int = 0
