@@ -305,11 +305,24 @@ class QuantEngine:
                 "regime_move_pct": 0.0, "regime_range_pct": 0.0,
             }
         base = max(recent[0], 1e-9)
+        fast_base = max(fast[0], 1e-9)
+        deltas = [recent[i] - recent[i - 1] for i in range(1, len(recent))]
+        signs = [1 if d > 0 else -1 if d < 0 else 0 for d in deltas]
+        nonzero_signs = [s for s in signs if s]
+        sign_changes = sum(
+            nonzero_signs[i] != nonzero_signs[i - 1]
+            for i in range(1, len(nonzero_signs))
+        )
         return {
             "spot_points": len(recent),
-            "fast_move_pct": (fast[-1] - fast[0]) / max(fast[0], 1e-9),
+            "fast_points": len(fast),
+            "fast_move_pct": (fast[-1] - fast[0]) / fast_base,
+            "fast_range_pct": (max(fast) - min(fast)) / fast_base,
             "regime_move_pct": (recent[-1] - recent[0]) / base,
             "regime_range_pct": (max(recent) - min(recent)) / base,
+            "sign_changes": sign_changes,
+            "early_threshold_pct": CONFIG.phase_early_move_pct,
+            "breakout_threshold_pct": CONFIG.phase_breakout_move_pct,
         }
 
     @classmethod
@@ -427,6 +440,10 @@ class QuantEngine:
             audit.fast_move_pct = float(pm["fast_move_pct"])
             audit.regime_move_pct = float(pm["regime_move_pct"])
             audit.regime_range_pct = float(pm["regime_range_pct"])
+            audit.fast_range_pct = float(pm.get("fast_range_pct", 0.0))
+            audit.sign_changes = int(pm.get("sign_changes", 0))
+            audit.early_threshold_pct = float(pm.get("early_threshold_pct", CONFIG.phase_early_move_pct))
+            audit.breakout_threshold_pct = float(pm.get("breakout_threshold_pct", CONFIG.phase_breakout_move_pct))
 
         for q in state.options.values():
             if q.option_type not in {"CE", "PE"}:
