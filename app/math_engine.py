@@ -246,7 +246,20 @@ class QuantEngine:
         # Compact 12-point histories are classified from their overall shape.
         # A narrow range with small net drift is accumulation.
         if history_len <= 16:
-            if range_pct <= 0.0035 and abs(net_recent) <= 0.0012:
+            # Accumulation is characterized by compression plus repeated
+            # directional reversals, not merely a small net move.
+            deltas = [recent[i] - recent[i - 1] for i in range(1, len(recent))]
+            signs = [1 if d > 0 else -1 if d < 0 else 0 for d in deltas]
+            nonzero_signs = [s for s in signs if s]
+            sign_changes = sum(
+                nonzero_signs[i] != nonzero_signs[i - 1]
+                for i in range(1, len(nonzero_signs))
+            )
+            if (
+                range_pct <= 0.0035
+                and abs(net_recent) <= 0.0015
+                and sign_changes >= 2
+            ):
                 confidence = min(0.95, 0.55 + max(0.0, 0.0035 - range_pct) * 60.0)
                 return "ACCUMULATION", direction, confidence
 
