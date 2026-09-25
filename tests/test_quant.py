@@ -136,3 +136,14 @@ def test_market_phase_prefers_real_observation_time_window():
     assert direction == "BULLISH"
     assert phase in {"EARLY_CONFIRMATION", "BREAKOUT", "TRANSITION"}
     assert confidence > 0.0
+
+
+def test_phase_metrics_exposes_live_diagnostic_fields():
+    state = MarketState(spot=100.0)
+    state.spot_history = [100.0 + (0.01 * (i % 5)) for i in range(40)]
+    metrics = QuantEngine.phase_metrics(state)
+    assert metrics["spot_points"] == 40
+    assert "fast_range_pct" in metrics
+    assert "sign_changes" in metrics
+    assert metrics["early_threshold_pct"] > 0
+    assert metrics["breakout_threshold_pct"] > metrics["early_threshold_pct"]
