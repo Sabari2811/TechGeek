@@ -110,6 +110,9 @@ class Terminal:
         print("\nOPTION CHAIN")
         print(f"  Contracts: {audit.total_options} (CE {audit.calls} / PE {audit.puts})")
         print(f"  Evaluated: {audit.evaluated} | Candidates above engine gates: {audit.eligible_before_min_ev} | Final ≥ ₹{min_net_ev:.2f}: {audit.final_candidates}")
+        print(f"  Microstructure: {audit.microstructure_evaluated} evaluated | {audit.microstructure_passed} PASS | {audit.microstructure_rejected} REJECT")
+        if audit.microstructure_last_reason:
+            print(f"  Depth decision: {audit.microstructure_last_reason}")
         print("\nREJECTION COUNTS")
         if audit.rejected:
             for reason, count in sorted(audit.rejected.items(), key=lambda x: (-x[1], x[0]))[:8]:
