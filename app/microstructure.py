@@ -51,7 +51,7 @@ class MicrostructureEngine:
     def from_depth(cls, instrument: str, payload: dict, state: MicrostructureState) -> MicrostructureSnapshot | None:
         depth = payload.get("market_depth", {}) if isinstance(payload, dict) else {}
         levels = depth.get("depth", []) or []
-        if not levels:
+        if len(levels) < 5:
             return None
 
         bids, asks = [], []
@@ -62,15 +62,15 @@ class MicrostructureEngine:
                 # Provider variants may expose one row as bid/ask fields.
                 buy = row.get("bid") or row.get("bids") or {}
                 sell = row.get("ask") or row.get("asks") or {}
-            bp = cls._num(buy.get("price") or buy.get("bid_price") or buy.get("price"))
-            bq = cls._num(buy.get("quantity") or buy.get("bid_quantity") or buy.get("qty"))
-            ap = cls._num(sell.get("price") or sell.get("ask_price") or sell.get("price"))
-            aq = cls._num(sell.get("quantity") or sell.get("ask_quantity") or sell.get("qty"))
+            bp = cls._num(buy.get("price") or buy.get("bid_price") or buy.get("bidPrice"))
+            bq = cls._num(buy.get("quantity") or buy.get("bid_quantity") or buy.get("bidQuantity") or buy.get("qty"))
+            ap = cls._num(sell.get("price") or sell.get("ask_price") or sell.get("askPrice"))
+            aq = cls._num(sell.get("quantity") or sell.get("ask_quantity") or sell.get("askQuantity") or sell.get("qty"))
             if bp > 0:
                 bids.append((bp, bq))
             if ap > 0:
                 asks.append((ap, aq))
-        if not bids or not asks:
+        if len(bids) < 5 or len(asks) < 5:
             return None
 
         best_bid, _ = bids[0]
