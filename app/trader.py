@@ -189,7 +189,7 @@ async def run():
                 reason_text = f"Candidate rejected — {micro_reason} (security_id={q.security_id})"
                 if micro_reason == "microstructure unavailable" and depth_diag:
                     reason_text += f" | {depth_diag}"
-                Terminal.waiting(state.spot, reason_text, checks, execution.position, execution.closed_trades, risk.state.trades_today)
+                Terminal.waiting(state.spot, reason_text, checks)
                 await asyncio.sleep(CONFIG.poll_seconds)
                 continue
 
