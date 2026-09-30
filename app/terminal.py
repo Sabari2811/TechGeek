@@ -78,12 +78,14 @@ class Terminal:
     @staticmethod
     def waiting(spot: float = 0.0, reason: str = "Waiting for mathematical edge...", checks=None,
                 active=None, closed=None, total_taken=0):
+        # Trade state is rendered centrally by _header(). The optional
+        # arguments are retained for backward compatibility with callers.
+        if active is not None or closed is not None or total_taken:
+            Terminal.set_trade_state(active, closed or [], total_taken)
         Terminal._header(spot)
         print("\nSIGNAL")
         print(f"  {Terminal._paint('●', YELLOW)} {Terminal._paint('WAIT', YELLOW)}")
         print(f"  {reason}")
-        Terminal._trade_ledger(position, closed or [], total_taken)
-        Terminal._trade_ledger(None, closed or [], total_taken)
         print("\nCHECKLIST")
         if checks:
             for label, passed in checks.items():
@@ -91,7 +93,6 @@ class Terminal:
         else:
             print(Terminal._check("Session / risk", CONFIG.session_active()))
             print(Terminal._check("Mathematical edge", False))
-        Terminal._trade_ledger(active, closed or [], total_taken)
         print("\nNo order. Waiting for the next mathematical edge.")
 
     @staticmethod
