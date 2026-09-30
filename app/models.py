@@ -95,6 +95,10 @@ class SignalAudit:
     evaluated: int = 0
     eligible_before_min_ev: int = 0
     final_candidates: int = 0
+    microstructure_evaluated: int = 0
+    microstructure_passed: int = 0
+    microstructure_rejected: int = 0
+    microstructure_last_reason: str = ""
 
     def reject(self, reason: str) -> None:
         self.rejected[reason] = self.rejected.get(reason, 0) + 1
