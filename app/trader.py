@@ -60,6 +60,7 @@ async def run():
                 save_today([], today, execution.closed_trades)
             learning.learn_if_new_day()
 
+            Terminal.set_trade_state(execution.position, execution.closed_trades, len(execution.closed_trades) + (1 if execution.position else 0))
             if not CONFIG.session_active():
                 Terminal.waiting(state.spot, "Outside market session. Run during 09:30–15:15 IST.", closed=execution.closed_trades, total_taken=risk.state.trades_today)
                 await asyncio.sleep(30)
@@ -100,13 +101,17 @@ async def run():
                         closed = await execution.exit(q.bid or q.ltp, "STOP LOSS")
                         risk.record_trade(closed.realized_pnl)
                         learning.record(p.signal, closed.realized_pnl)
-                        Terminal.closed(closed, state.spot, execution.closed_trades, risk.state.trades_today)
+                        save_today(state.spot_history, today, execution.closed_trades)
+                Terminal.set_trade_state(execution.position, execution.closed_trades, len(execution.closed_trades) + (1 if execution.position else 0))
+                Terminal.closed(closed, state.spot, execution.closed_trades, risk.state.trades_today)
                         await asyncio.sleep(1)
                         continue
                     if q.ltp >= p.signal.target:
                         closed = await execution.exit(q.bid or q.ltp, "TARGET")
                         risk.record_trade(closed.realized_pnl)
                         learning.record(p.signal, closed.realized_pnl)
+                        save_today(state.spot_history, today, execution.closed_trades)
+                        Terminal.set_trade_state(execution.position, execution.closed_trades, len(execution.closed_trades) + (1 if execution.position else 0))
                         Terminal.closed(closed, state.spot)
                         await asyncio.sleep(1)
                         continue
@@ -116,10 +121,13 @@ async def run():
                     closed = await execution.exit(price, "SESSION SQUARE-OFF")
                     risk.record_trade(closed.realized_pnl)
                     learning.record(p.signal, closed.realized_pnl)
+                    save_today(state.spot_history, today, execution.closed_trades)
+                    Terminal.set_trade_state(execution.position, execution.closed_trades, len(execution.closed_trades) + (1 if execution.position else 0))
                     Terminal.closed(closed, state.spot)
                     await asyncio.sleep(1)
                     continue
 
+                Terminal.set_trade_state(execution.position, execution.closed_trades, len(execution.closed_trades) + (1 if execution.position else 0))
                 Terminal.active(p, state.spot, execution.closed_trades, risk.state.trades_today)
                 await asyncio.sleep(CONFIG.poll_seconds)
                 continue
@@ -133,6 +141,7 @@ async def run():
             audit = SignalAudit()
             signal = QuantEngine.best_signal(state, CONFIG.min_net_ev, learner=learning, audit=audit)
             if not signal:
+                Terminal.set_trade_state(execution.position, execution.closed_trades, len(execution.closed_trades) + (1 if execution.position else 0))
                 Terminal.waiting_audit(state.spot, audit, CONFIG.min_net_ev, execution.position, execution.closed_trades, risk.state.trades_today)
                 await asyncio.sleep(CONFIG.poll_seconds)
                 continue
@@ -199,8 +208,10 @@ async def run():
 
             try:
                 p = await execution.enter(signal, qty)
+                Terminal.set_trade_state(execution.position, execution.closed_trades, len(execution.closed_trades) + (1 if execution.position else 0))
                 Terminal.active(p, state.spot)
             except Exception as exc:
+                Terminal.set_trade_state(execution.position, execution.closed_trades, len(execution.closed_trades) + (1 if execution.position else 0))
                 Terminal.waiting(state.spot, f"Execution blocked: {exc}", checks, execution.position, execution.closed_trades, risk.state.trades_today)
 
             await asyncio.sleep(CONFIG.poll_seconds)
