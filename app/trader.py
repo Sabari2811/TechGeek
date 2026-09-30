@@ -62,7 +62,7 @@ async def run():
 
             Terminal.set_trade_state(execution.position, execution.closed_trades, len(execution.closed_trades) + (1 if execution.position else 0))
             if not CONFIG.session_active():
-                Terminal.waiting(state.spot, "Outside market session. Run during 09:30–15:15 IST.", closed=execution.closed_trades, total_taken=risk.state.trades_today)
+                Terminal.waiting(state.spot, "Outside market session. Run during 09:30–15:15 IST.")
                 await asyncio.sleep(30)
                 continue
 
@@ -74,7 +74,7 @@ async def run():
                 load_chain_into_state(state, chain)
                 save_today(state.spot_history, today, execution.closed_trades)
             except Exception as exc:
-                Terminal.waiting(state.spot, f"Data feed warning: {exc}", active=execution.position, closed=execution.closed_trades, total_taken=risk.state.trades_today)
+                Terminal.waiting(state.spot, f"Data feed warning: {exc}")
                 await asyncio.sleep(CONFIG.poll_seconds)
                 continue
 
@@ -103,7 +103,7 @@ async def run():
                         learning.record(p.signal, closed.realized_pnl)
                         save_today(state.spot_history, today, execution.closed_trades)
                         Terminal.set_trade_state(execution.position, execution.closed_trades, len(execution.closed_trades) + (1 if execution.position else 0))
-                        Terminal.closed(closed, state.spot, execution.closed_trades, risk.state.trades_today)
+                        Terminal.closed(closed, state.spot)
                         await asyncio.sleep(1)
                         continue
                     if q.ltp >= p.signal.target:
@@ -142,7 +142,7 @@ async def run():
             signal = QuantEngine.best_signal(state, CONFIG.min_net_ev, learner=learning, audit=audit)
             if not signal:
                 Terminal.set_trade_state(execution.position, execution.closed_trades, len(execution.closed_trades) + (1 if execution.position else 0))
-                Terminal.waiting_audit(state.spot, audit, CONFIG.min_net_ev, execution.position, execution.closed_trades, risk.state.trades_today)
+                Terminal.waiting_audit(state.spot, audit, CONFIG.min_net_ev)
                 await asyncio.sleep(CONFIG.poll_seconds)
                 continue
 
