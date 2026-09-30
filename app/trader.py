@@ -102,8 +102,8 @@ async def run():
                         risk.record_trade(closed.realized_pnl)
                         learning.record(p.signal, closed.realized_pnl)
                         save_today(state.spot_history, today, execution.closed_trades)
-                Terminal.set_trade_state(execution.position, execution.closed_trades, len(execution.closed_trades) + (1 if execution.position else 0))
-                Terminal.closed(closed, state.spot, execution.closed_trades, risk.state.trades_today)
+                        Terminal.set_trade_state(execution.position, execution.closed_trades, len(execution.closed_trades) + (1 if execution.position else 0))
+                        Terminal.closed(closed, state.spot, execution.closed_trades, risk.state.trades_today)
                         await asyncio.sleep(1)
                         continue
                     if q.ltp >= p.signal.target:
@@ -112,7 +112,7 @@ async def run():
                         learning.record(p.signal, closed.realized_pnl)
                         save_today(state.spot_history, today, execution.closed_trades)
                         Terminal.set_trade_state(execution.position, execution.closed_trades, len(execution.closed_trades) + (1 if execution.position else 0))
-                        Terminal.closed(closed, state.spot)
+                        Terminal.closed(closed, state.spot, execution.closed_trades, risk.state.trades_today)
                         await asyncio.sleep(1)
                         continue
 
@@ -123,7 +123,7 @@ async def run():
                     learning.record(p.signal, closed.realized_pnl)
                     save_today(state.spot_history, today, execution.closed_trades)
                     Terminal.set_trade_state(execution.position, execution.closed_trades, len(execution.closed_trades) + (1 if execution.position else 0))
-                    Terminal.closed(closed, state.spot)
+                    Terminal.closed(closed, state.spot, execution.closed_trades, risk.state.trades_today)
                     await asyncio.sleep(1)
                     continue
 
