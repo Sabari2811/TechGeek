@@ -32,3 +32,24 @@ def test_sweep_proxy_is_bounded():
     snap = MicrostructureEngine.from_depth("NFO_1", make_depth(100, 10, ask=100.2), state)
     assert snap is not None
     assert -1.0 <= snap.sweep_score <= 1.0
+
+
+def test_requires_five_depth_levels():
+    state = MicrostructureState()
+    payload = make_depth()
+    payload["market_depth"]["depth"] = payload["market_depth"]["depth"][:1]
+    assert MicrostructureEngine.from_depth("NFO_1", payload, state) is None
+
+
+def test_parses_provider_bid_ask_quantity_variants():
+    state = MicrostructureState()
+    levels = []
+    for i in range(5):
+        levels.append({
+            "bid": {"bidPrice": 100.0 - i * 0.05, "bidQuantity": "100"},
+            "ask": {"askPrice": 100.1 + i * 0.05, "askQuantity": "120"},
+        })
+    snap = MicrostructureEngine.from_depth("NFO_1", {"live_price": 100.05, "market_depth": {"depth": levels}}, state)
+    assert snap is not None
+    assert snap.total_bid_qty == 500
+    assert snap.total_ask_qty == 600
