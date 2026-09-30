@@ -8,7 +8,7 @@ from .microstructure import MicrostructureEngine, MicrostructureState
 from .risk import RiskManager
 from .execution import ExecutionEngine
 from .learning import IncrementalLearner
-from .session_state import load_today, save_today
+from .session_state import load_today, load_today_trades, save_today
 from .raw_data import record_option_chain
 from .terminal import Terminal
 
@@ -29,6 +29,7 @@ async def run():
 
     client = IndstocksClient()
     state = MarketState()
+    closed_trades = load_today_trades(datetime.now(IST).date())
     # Restore only today's spot observations. Options, positions and secrets are
     # intentionally never persisted, so a restart cannot resurrect stale orders.
     state.spot_history = load_today(datetime.now(IST).date())
@@ -38,6 +39,7 @@ async def run():
     risk = RiskManager()
     learning = IncrementalLearner()
     execution = ExecutionEngine(client)
+    execution.closed_trades = list(closed_trades)
     expiry = None
     risk_day = datetime.now(IST).date()
 
@@ -54,11 +56,12 @@ async def run():
                 state.spot = 0.0
                 state.timestamp = None
                 expiry = None
-                save_today([], today)
+                execution.closed_trades.clear()
+                save_today([], today, execution.closed_trades)
             learning.learn_if_new_day()
 
             if not CONFIG.session_active():
-                Terminal.waiting(state.spot, "Outside market session. Run during 09:30–15:15 IST.")
+                Terminal.waiting(state.spot, "Outside market session. Run during 09:30–15:15 IST.", closed=execution.closed_trades, total_taken=risk.state.trades_today)
                 await asyncio.sleep(30)
                 continue
 
@@ -68,9 +71,9 @@ async def run():
                 chain = await client.option_chain(expiry)
                 record_option_chain(chain, expiry=expiry)
                 load_chain_into_state(state, chain)
-                save_today(state.spot_history, today)
+                save_today(state.spot_history, today, execution.closed_trades)
             except Exception as exc:
-                Terminal.waiting(state.spot, f"Data feed warning: {exc}")
+                Terminal.waiting(state.spot, f"Data feed warning: {exc}", active=execution.position, closed=execution.closed_trades, total_taken=risk.state.trades_today)
                 await asyncio.sleep(CONFIG.poll_seconds)
                 continue
 
@@ -97,7 +100,7 @@ async def run():
                         closed = await execution.exit(q.bid or q.ltp, "STOP LOSS")
                         risk.record_trade(closed.realized_pnl)
                         learning.record(p.signal, closed.realized_pnl)
-                        Terminal.closed(closed, state.spot)
+                        Terminal.closed(closed, state.spot, execution.closed_trades, risk.state.trades_today)
                         await asyncio.sleep(1)
                         continue
                     if q.ltp >= p.signal.target:
@@ -117,7 +120,7 @@ async def run():
                     await asyncio.sleep(1)
                     continue
 
-                Terminal.active(p, state.spot)
+                Terminal.active(p, state.spot, execution.closed_trades, risk.state.trades_today)
                 await asyncio.sleep(CONFIG.poll_seconds)
                 continue
 
@@ -130,7 +133,7 @@ async def run():
             audit = SignalAudit()
             signal = QuantEngine.best_signal(state, CONFIG.min_net_ev, learner=learning, audit=audit)
             if not signal:
-                Terminal.waiting_audit(state.spot, audit, CONFIG.min_net_ev)
+                Terminal.waiting_audit(state.spot, audit, CONFIG.min_net_ev, execution.position, execution.closed_trades, risk.state.trades_today)
                 await asyncio.sleep(CONFIG.poll_seconds)
                 continue
 
@@ -172,7 +175,7 @@ async def run():
                 reason_text = f"Candidate rejected — {micro_reason} (security_id={q.security_id})"
                 if micro_reason == "microstructure unavailable" and depth_diag:
                     reason_text += f" | {depth_diag}"
-                Terminal.waiting(state.spot, reason_text, checks)
+                Terminal.waiting(state.spot, reason_text, checks, execution.position, execution.closed_trades, risk.state.trades_today)
                 await asyncio.sleep(CONFIG.poll_seconds)
                 continue
 
@@ -198,7 +201,7 @@ async def run():
                 p = await execution.enter(signal, qty)
                 Terminal.active(p, state.spot)
             except Exception as exc:
-                Terminal.waiting(state.spot, f"Execution blocked: {exc}", checks)
+                Terminal.waiting(state.spot, f"Execution blocked: {exc}", checks, execution.position, execution.closed_trades, risk.state.trades_today)
 
             await asyncio.sleep(CONFIG.poll_seconds)
 
