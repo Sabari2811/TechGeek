@@ -43,3 +43,17 @@ def test_real_timestamped_directional_regime_can_confirm_before_fast_threshold()
     assert metrics["directional_efficiency"] >= 0.35
     assert phase == "EARLY_CONFIRMATION"
     assert confidence > 0.5
+
+
+def test_phase_metrics_include_window_counts_and_efficiency():
+    state = MarketState(spot=100.0)
+    start = datetime(2026, 9, 30, 10, 0)
+    prices = [100.0 + 0.01 * i for i in range(80)]
+    state.spot_observations = [
+        (start + timedelta(seconds=4 * i), p) for i, p in enumerate(prices)
+    ]
+    state.spot_history = prices
+    metrics = QuantEngine.phase_metrics(state)
+    assert metrics["spot_points"] == 76
+    assert metrics["fast_points"] >= 5
+    assert metrics["directional_efficiency"] > 0.95
