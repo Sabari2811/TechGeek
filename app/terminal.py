@@ -1,7 +1,7 @@
 from datetime import datetime
 from zoneinfo import ZoneInfo
 from .config import CONFIG
-from .models import Position
+from .models import Position, TradeRecord
 
 
 IST = ZoneInfo("Asia/Kolkata")
@@ -45,11 +45,41 @@ class Terminal:
         print("╚══════════════════════════════════════════════════════╝")
 
     @staticmethod
-    def waiting(spot: float = 0.0, reason: str = "Waiting for mathematical edge...", checks=None):
+    def _trade_ledger(active: Position | None, closed: list[TradeRecord], total_taken: int):
+        realized = sum(t.pnl for t in closed)
+        unrealized = active.unrealized_pnl if active else 0.0
+        print("\nTRADES TODAY")
+        print(f"  Taken {total_taken} | Closed {len(closed)} | Open {1 if active else 0}")
+        pnl_color = GREEN if realized + unrealized >= 0 else RED
+        print(f"  P&L        {Terminal._paint(f'₹{realized + unrealized:,.2f}', pnl_color)}"
+              f" | Realized ₹{realized:,.2f} | Unrealized ₹{unrealized:,.2f}")
+        if active:
+            s = active.signal
+            print("\nCURRENT TRADE")
+            print(f"  {s.symbol or f'NIFTY {s.strike:g} {s.option_type}'} | Qty {active.quantity}")
+            print(f"  Entry ₹{active.entry_price:,.2f} | Current ₹{active.current_price:,.2f}"
+                  f" | SL ₹{s.stop:,.2f} | Target ₹{s.target:,.2f}")
+            live_color = GREEN if active.unrealized_pnl >= 0 else RED
+            print(f"  Live P&L  {Terminal._paint(f'₹{active.unrealized_pnl:,.2f}', live_color)}")
+        if closed:
+            print("\nCLOSED TRADES")
+            for i, t in enumerate(closed, 1):
+                result_color = GREEN if t.pnl >= 0 else RED
+                result = "PROFIT" if t.pnl >= 0 else "LOSS"
+                print(f"  #{i} {t.symbol or f'NIFTY {t.strike:g} {t.option_type}'} | "
+                      f"Entry ₹{t.entry_price:,.2f} | Exit ₹{t.exit_price:,.2f} | "
+                      f"SL ₹{t.stop_price:,.2f} | Qty {t.quantity} | "
+                      f"{Terminal._paint(f'₹{t.pnl:,.2f} {result}', result_color)} | {t.exit_reason}")
+
+    @staticmethod
+    def waiting(spot: float = 0.0, reason: str = "Waiting for mathematical edge...", checks=None,
+                active=None, closed=None, total_taken=0):
         Terminal._header(spot)
         print("\nSIGNAL")
         print(f"  {Terminal._paint('●', YELLOW)} {Terminal._paint('WAIT', YELLOW)}")
         print(f"  {reason}")
+        Terminal._trade_ledger(position, closed or [], total_taken)
+        Terminal._trade_ledger(None, closed or [], total_taken)
         print("\nCHECKLIST")
         if checks:
             for label, passed in checks.items():
@@ -57,6 +87,7 @@ class Terminal:
         else:
             print(Terminal._check("Session / risk", CONFIG.session_active()))
             print(Terminal._check("Mathematical edge", False))
+        Terminal._trade_ledger(active, closed or [], total_taken)
         print("\nNo order. Waiting for the next mathematical edge.")
 
     @staticmethod
@@ -67,7 +98,8 @@ class Terminal:
         print(f"  Blocking stage: {audit.blocking_reason}")
         print(f"  Phase: {audit.phase} | Direction: {audit.phase_direction} | Confidence: {audit.phase_confidence:.2f}")
         print(f"  Spot points: {audit.spot_points} | Fast move: {audit.fast_move_pct:+.3%} | Fast range: {audit.fast_range_pct:.3%}")
-        print(f"  Regime move: {audit.regime_move_pct:+.3%} | Regime range: {audit.regime_range_pct:.3%} | Reversals: {audit.sign_changes}")
+        print(f"  Regime move: {audit.regime_move_pct:+.3%} | Regime range: {audit.regime_range_pct:.3%} | "
+              f"Efficiency: {audit.directional_efficiency:.1%} | Reversals: {audit.sign_changes}")
         print(f"  Entry thresholds: early ≥ {audit.early_threshold_pct:.3%} | breakout ≥ {audit.breakout_threshold_pct:.3%}")
         print("\nOPTION CHAIN")
         print(f"  Contracts: {audit.total_options} (CE {audit.calls} / PE {audit.puts})")
@@ -93,7 +125,7 @@ class Terminal:
         print("\nNo order. Waiting for the next mathematical edge.")
 
     @staticmethod
-    def active(position: Position, spot: float = 0.0):
+    def active(position: Position, spot: float = 0.0, closed=None, total_taken=0):
         Terminal._header(spot)
         s = position.signal
         pnl = position.unrealized_pnl
@@ -119,7 +151,7 @@ class Terminal:
             print(Terminal._check(label, passed))
 
     @staticmethod
-    def closed(position: Position, spot: float = 0.0):
+    def closed(position: Position, spot: float = 0.0, closed=None, total_taken=0):
         Terminal._header(spot)
         s = position.signal
         pnl = position.realized_pnl
