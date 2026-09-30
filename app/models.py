@@ -86,6 +86,8 @@ class SignalAudit:
     regime_move_pct: float = 0.0
     regime_range_pct: float = 0.0
     fast_range_pct: float = 0.0
+    fast_points: int = 0
+    regime_points: int = 0
     directional_efficiency: float = 0.0
     sign_changes: int = 0
     early_threshold_pct: float = 0.0
