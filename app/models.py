@@ -51,8 +51,6 @@ class MarketState:
         if price > 0:
             self.spot = price
             self.timestamp = timestamp
-            # Do not let repeated identical polling observations masquerade as
-            # independent price movement in the pre-breakout detector.
             if not self.spot_history or self.spot_history[-1] != price:
                 self.spot_history.append(price)
                 self.spot_observations.append((timestamp, price))
@@ -66,7 +64,6 @@ class MarketState:
 
     def get_option(self, strike: float, option_type: str) -> Optional[OptionQuote]:
         return self.options.get(self.key(strike, option_type))
-
 
 
 @dataclass
@@ -89,6 +86,7 @@ class SignalAudit:
     regime_move_pct: float = 0.0
     regime_range_pct: float = 0.0
     fast_range_pct: float = 0.0
+    directional_efficiency: float = 0.0
     sign_changes: int = 0
     early_threshold_pct: float = 0.0
     breakout_threshold_pct: float = 0.0
@@ -154,3 +152,35 @@ class Position:
         if self.exit_price <= 0:
             return 0.0
         return (self.exit_price - self.entry_price) * self.quantity
+
+
+@dataclass
+class TradeRecord:
+    symbol: str
+    option_type: str
+    strike: float
+    entry_price: float
+    stop_price: float
+    exit_price: float
+    quantity: int
+    opened_at: datetime
+    closed_at: datetime
+    pnl: float
+    exit_reason: str
+
+    @classmethod
+    def from_position(cls, position: Position, closed_at: datetime | None = None) -> "TradeRecord":
+        closed_at = closed_at or datetime.now()
+        return cls(
+            symbol=position.signal.symbol,
+            option_type=position.signal.option_type,
+            strike=position.signal.strike,
+            entry_price=position.entry_price,
+            stop_price=position.signal.stop,
+            exit_price=position.exit_price,
+            quantity=position.quantity,
+            opened_at=position.opened_at,
+            closed_at=closed_at,
+            pnl=position.realized_pnl,
+            exit_reason=position.exit_reason,
+        )
