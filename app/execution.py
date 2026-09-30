@@ -2,13 +2,15 @@ import asyncio
 import uuid
 from datetime import datetime
 from .config import CONFIG
-from .models import Position, TradeSignal
+from .models import Position, TradeRecord, TradeSignal
 from .market import IndstocksClient
+
 
 class ExecutionEngine:
     def __init__(self, client: IndstocksClient):
         self.client = client
         self.position: Position | None = None
+        self.closed_trades: list[TradeRecord] = []
 
     async def _live_order(self, txn_type: str, security_id: str, qty: int, price: float, tag: str):
         response = await self.client.place_order(txn_type, security_id, qty, price, tag)
@@ -19,8 +21,6 @@ class ExecutionEngine:
         if not order_id:
             raise RuntimeError("Broker accepted order but returned no order_id")
 
-        # Never assume an accepted order is filled. Reconcile repeatedly so a delayed
-        # exchange/broker fill cannot leave the strategy with false position state.
         terminal = {"SUCCESS", "CANCELLED", "FAILED", "ABORTED", "EXPIRED",
                     "PARTIALLY FILLED - CANCELLED", "PARTIALLY FILLED - EXPIRED"}
         latest = None
@@ -37,8 +37,6 @@ class ExecutionEngine:
                     raise RuntimeError(f"Order finished without a fill: {latest_status}")
             await asyncio.sleep(0.5)
 
-        # A limit order that is still working is not a live position. Cancel the
-        # remaining quantity rather than allowing an old signal to fill later.
         if latest:
             current_status = str(latest.get("status") or "").upper()
             if current_status not in terminal:
@@ -62,8 +60,13 @@ class ExecutionEngine:
                 raise RuntimeError("Entry order accepted but not filled")
             entry = float(order.get("traded_price") or signal.entry)
             qty = traded_qty
-        self.position = Position(signal=signal, entry_price=entry, quantity=qty,
-                                 opened_at=datetime.now(), current_price=entry)
+        self.position = Position(
+            signal=signal,
+            entry_price=entry,
+            quantity=qty,
+            opened_at=datetime.now(),
+            current_price=entry,
+        )
         return self.position
 
     async def exit(self, price: float, reason: str) -> Position | None:
@@ -81,5 +84,7 @@ class ExecutionEngine:
         else:
             p.exit_price = price
         p.exit_reason = reason
+        closed = p
+        self.closed_trades.append(TradeRecord.from_position(closed))
         self.position = None
-        return p
+        return closed
