@@ -58,8 +58,14 @@ class MicrostructureEngine:
         for row in levels[:5]:
             buy = row.get("buy", {}) or {}
             sell = row.get("sell", {}) or {}
-            bp, bq = cls._num(buy.get("price")), cls._num(buy.get("quantity"))
-            ap, aq = cls._num(sell.get("price")), cls._num(sell.get("quantity"))
+            if not buy and not sell:
+                # Provider variants may expose one row as bid/ask fields.
+                buy = row.get("bid") or row.get("bids") or {}
+                sell = row.get("ask") or row.get("asks") or {}
+            bp = cls._num(buy.get("price") or buy.get("bid_price") or buy.get("price"))
+            bq = cls._num(buy.get("quantity") or buy.get("bid_quantity") or buy.get("qty"))
+            ap = cls._num(sell.get("price") or sell.get("ask_price") or sell.get("price"))
+            aq = cls._num(sell.get("quantity") or sell.get("ask_quantity") or sell.get("qty"))
             if bp > 0:
                 bids.append((bp, bq))
             if ap > 0:
