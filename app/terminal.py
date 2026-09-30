@@ -102,7 +102,8 @@ class Terminal:
         print(f"  {Terminal._paint('●', YELLOW)} {Terminal._paint('WAIT', YELLOW)}")
         print(f"  Blocking stage: {audit.blocking_reason}")
         print(f"  Phase: {audit.phase} | Direction: {audit.phase_direction} | Confidence: {audit.phase_confidence:.2f}")
-        print(f"  Spot points: {audit.spot_points} | Fast move: {audit.fast_move_pct:+.3%} | Fast range: {audit.fast_range_pct:.3%}")
+        print(f"  5M points: {audit.regime_points} | 1M points: {audit.fast_points} | "
+              f"Fast move: {audit.fast_move_pct:+.3%} | Fast range: {audit.fast_range_pct:.3%}")
         print(f"  Regime move: {audit.regime_move_pct:+.3%} | Regime range: {audit.regime_range_pct:.3%} | "
               f"Efficiency: {audit.directional_efficiency:.1%} | Reversals: {audit.sign_changes}")
         print(f"  Entry thresholds: early ≥ {audit.early_threshold_pct:.3%} | breakout ≥ {audit.breakout_threshold_pct:.3%}")
