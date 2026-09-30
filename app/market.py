@@ -211,11 +211,21 @@ def _extract_market_depth_object(value, _seen=None) -> dict:
     if isinstance(md, dict):
         levels = _as_levels(md.get("depth")) or _as_levels(md.get("levels"))
         if levels:
+            # INDstocks may expose the five levels as raw rows rather than
+            # already-normalized buy/sell objects. Preserve them verbatim; the
+            # microstructure layer will normalize the row fields.
             return {"market_depth": {"depth": levels[:5]}}
         paired = _pair_bid_ask_levels(md.get("buy") or md.get("bids") or md.get("bid"),
                                       md.get("sell") or md.get("asks") or md.get("ask"))
         if paired:
             return paired
+        aggregate = md.get("aggregate")
+        if isinstance(aggregate, dict):
+            bid = aggregate.get("buy") or aggregate.get("bid") or aggregate.get("bids")
+            ask = aggregate.get("sell") or aggregate.get("ask") or aggregate.get("asks")
+            paired = _pair_bid_ask_levels(bid, ask)
+            if paired:
+                return paired
 
     paired = _pair_bid_ask_levels(value.get("buy") or value.get("bids") or value.get("bid"),
                                   value.get("sell") or value.get("asks") or value.get("ask"))
