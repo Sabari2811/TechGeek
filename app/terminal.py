@@ -16,6 +16,36 @@ BOLD = "\033[1m"
 class Terminal:
     """Single-screen terminal UI with ANSI color-coded status states."""
 
+    _active_trade = None
+    _closed_trades = []
+    _total_trades = 0
+
+    @staticmethod
+    def set_trade_state(active, closed, total_trades):
+        Terminal._active_trade = active
+        Terminal._closed_trades = list(closed or [])
+        Terminal._total_trades = total_trades
+
+    @staticmethod
+    def _trade_state():
+        active = Terminal._active_trade
+        closed = Terminal._closed_trades
+        realized = sum(t.pnl for t in closed)
+        print("\nTRADES TODAY")
+        print(f"  Taken {Terminal._total_trades} | Closed {len(closed)} | Open {1 if active else 0}")
+        print(f"  P&L ₹{realized + (active.unrealized_pnl if active else 0.0):,.2f}")
+        if active:
+            s = active.signal
+            print("\nCURRENT TRADE")
+            print(f"  {s.symbol} | Entry ₹{active.entry_price:,.2f} | Current ₹{active.current_price:,.2f}")
+            print(f"  SL ₹{s.stop:,.2f} | Exit -- | Live P&L ₹{active.unrealized_pnl:,.2f}")
+        if closed:
+            print("\nCLOSED TRADES")
+            for i, t in enumerate(closed, 1):
+                result = "PROFIT" if t.pnl >= 0 else "LOSS"
+                print(f"  #{i} {t.symbol} | Entry ₹{t.entry_price:,.2f} | Exit ₹{t.exit_price:,.2f} | "
+                      f"SL ₹{t.stop_price:,.2f} | {result} ₹{t.pnl:,.2f} | {t.exit_reason}")
+
     @staticmethod
     def clear():
         print("\033[2J\033[H", end="")
@@ -43,6 +73,7 @@ class Terminal:
         else:
             print(f"║ TIME     {now} IST     NIFTY     --               ║")
         print("╚══════════════════════════════════════════════════════╝")
+        Terminal._trade_state()
 
     @staticmethod
     def _trade_ledger(active: Position | None, closed: list[TradeRecord], total_taken: int):
