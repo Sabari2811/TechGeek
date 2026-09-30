@@ -220,6 +220,12 @@ class QuantEngine:
         has_real_timestamps = len(getattr(state, "spot_observations", [])) >= 12
 
         if has_real_timestamps:
+            # A broad move can be real directional development even when the
+            # final 60-second window is still noisy. Efficiency measures how
+            # much of the travelled distance contributed to net movement.
+            deltas = [recent[i] - recent[i - 1] for i in range(1, len(recent))]
+            total_abs_move = sum(abs(d) for d in deltas)
+            efficiency = abs(recent[-1] - recent[0]) / total_abs_move if total_abs_move > 0 else 0.0
             if abs(net_fast) >= CONFIG.phase_breakout_move_pct:
                 confidence = min(0.98, 0.65 + abs(net_fast) * 60.0)
                 return (
@@ -232,6 +238,22 @@ class QuantEngine:
                 return (
                     "EARLY_CONFIRMATION",
                     "BULLISH" if net_fast > 0 else "BEARISH",
+                    confidence,
+                )
+            # Do not wait for a full one-minute threshold when the 5-minute
+            # regime is already directional and sufficiently efficient. The
+            # fast window must at least agree in direction; otherwise remain
+            # strict and classify the market as accumulation/transition.
+            if (
+                abs(net_recent) >= CONFIG.phase_early_move_pct
+                and efficiency >= 0.35
+                and net_fast * net_recent > 0
+                and abs(net_fast) >= 0.00005
+            ):
+                confidence = min(0.92, 0.58 + efficiency * 0.25 + abs(net_recent) * 50.0)
+                return (
+                    "EARLY_CONFIRMATION",
+                    "BULLISH" if net_recent > 0 else "BEARISH",
                     confidence,
                 )
             if range_pct <= 0.0035 and abs(net_recent) <= 0.0012:
@@ -303,12 +325,18 @@ class QuantEngine:
             return {
                 "spot_points": len(recent), "fast_move_pct": 0.0,
                 "regime_move_pct": 0.0, "regime_range_pct": 0.0,
+                "directional_efficiency": 0.0,
             }
         base = max(recent[0], 1e-9)
         fast_base = max(fast[0], 1e-9)
         deltas = [recent[i] - recent[i - 1] for i in range(1, len(recent))]
         signs = [1 if d > 0 else -1 if d < 0 else 0 for d in deltas]
         nonzero_signs = [s for s in signs if s]
+        total_abs_move = sum(abs(d) for d in deltas)
+        directional_efficiency = (
+            abs(recent[-1] - recent[0]) / total_abs_move
+            if total_abs_move > 0 else 0.0
+        )
         sign_changes = sum(
             nonzero_signs[i] != nonzero_signs[i - 1]
             for i in range(1, len(nonzero_signs))
@@ -320,6 +348,7 @@ class QuantEngine:
             "fast_range_pct": (max(fast) - min(fast)) / fast_base,
             "regime_move_pct": (recent[-1] - recent[0]) / base,
             "regime_range_pct": (max(recent) - min(recent)) / base,
+            "directional_efficiency": directional_efficiency,
             "sign_changes": sign_changes,
             "early_threshold_pct": CONFIG.phase_early_move_pct,
             "breakout_threshold_pct": CONFIG.phase_breakout_move_pct,
