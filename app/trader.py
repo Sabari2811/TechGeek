@@ -37,6 +37,11 @@ async def run():
         state.spot = state.spot_history[-1]
     micro_state = MicrostructureState()
     risk = RiskManager()
+    risk.state.trades_today = len(closed_trades)
+    risk.state.realized_pnl = sum(t.pnl for t in closed_trades)
+    if risk.state.realized_pnl <= -CONFIG.max_daily_loss:
+        risk.state.halted = True
+        risk.state.halt_reason = "daily loss limit reached"
     learning = IncrementalLearner()
     execution = ExecutionEngine(client)
     execution.closed_trades = list(closed_trades)
