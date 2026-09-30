@@ -76,33 +76,6 @@ class Terminal:
         Terminal._trade_state()
 
     @staticmethod
-    def _trade_ledger(active: Position | None, closed: list[TradeRecord], total_taken: int):
-        realized = sum(t.pnl for t in closed)
-        unrealized = active.unrealized_pnl if active else 0.0
-        print("\nTRADES TODAY")
-        print(f"  Taken {total_taken} | Closed {len(closed)} | Open {1 if active else 0}")
-        pnl_color = GREEN if realized + unrealized >= 0 else RED
-        print(f"  P&L        {Terminal._paint(f'₹{realized + unrealized:,.2f}', pnl_color)}"
-              f" | Realized ₹{realized:,.2f} | Unrealized ₹{unrealized:,.2f}")
-        if active:
-            s = active.signal
-            print("\nCURRENT TRADE")
-            print(f"  {s.symbol or f'NIFTY {s.strike:g} {s.option_type}'} | Qty {active.quantity}")
-            print(f"  Entry ₹{active.entry_price:,.2f} | Current ₹{active.current_price:,.2f}"
-                  f" | SL ₹{s.stop:,.2f} | Target ₹{s.target:,.2f}")
-            live_color = GREEN if active.unrealized_pnl >= 0 else RED
-            print(f"  Live P&L  {Terminal._paint(f'₹{active.unrealized_pnl:,.2f}', live_color)}")
-        if closed:
-            print("\nCLOSED TRADES")
-            for i, t in enumerate(closed, 1):
-                result_color = GREEN if t.pnl >= 0 else RED
-                result = "PROFIT" if t.pnl >= 0 else "LOSS"
-                print(f"  #{i} {t.symbol or f'NIFTY {t.strike:g} {t.option_type}'} | "
-                      f"Entry ₹{t.entry_price:,.2f} | Exit ₹{t.exit_price:,.2f} | "
-                      f"SL ₹{t.stop_price:,.2f} | Qty {t.quantity} | "
-                      f"{Terminal._paint(f'₹{t.pnl:,.2f} {result}', result_color)} | {t.exit_reason}")
-
-    @staticmethod
     def waiting(spot: float = 0.0, reason: str = "Waiting for mathematical edge...", checks=None,
                 active=None, closed=None, total_taken=0):
         Terminal._header(spot)
