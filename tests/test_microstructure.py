@@ -34,11 +34,13 @@ def test_sweep_proxy_is_bounded():
     assert -1.0 <= snap.sweep_score <= 1.0
 
 
-def test_requires_five_depth_levels():
+def test_requires_at_least_one_valid_depth_level():
     state = MicrostructureState()
     payload = make_depth()
     payload["market_depth"]["depth"] = payload["market_depth"]["depth"][:1]
-    assert MicrostructureEngine.from_depth("NFO_1", payload, state) is None
+    # A single valid provider depth row is still a real snapshot; missing
+    # additional rows are not fabricated.
+    assert MicrostructureEngine.from_depth("NFO_1", payload, state) is not None
 
 
 def test_parses_provider_bid_ask_quantity_variants():
