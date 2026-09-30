@@ -161,23 +161,22 @@ async def run():
 
             depth_diag = ""
             try:
+                # market_depth() owns the documented REST/full-quote/WebSocket
+                # fallback chain. Do not issue a second duplicate fallback here.
                 depth_data = await client.market_depth([q.security_id])
                 raw_depth = extract_market_depth(depth_data, q.security_id)
-                if not raw_depth:
-                    fallback_data = await client.market_quote_fallback([q.security_id])
-                    if fallback_data:
-                        depth_data = fallback_data
-                        depth_diag = summarize_market_depth_payload(depth_data, q.security_id)
-                        raw_depth = extract_market_depth(depth_data, q.security_id)
-                    else:
-                        depth_diag = summarize_market_depth_payload(depth_data, q.security_id)
-                else:
-                    depth_diag = summarize_market_depth_payload(depth_data, q.security_id)
-
+                depth_diag = summarize_market_depth_payload(depth_data, q.security_id)
                 micro = MicrostructureEngine.from_depth(q.security_id, raw_depth, micro_state)
                 confirmed, micro_reason = MicrostructureEngine.confirmation(micro)
             except Exception as exc:
                 confirmed, micro_reason = False, f"depth feed unavailable: {exc}"
+
+            audit.microstructure_evaluated += 1
+            audit.microstructure_last_reason = micro_reason
+            if confirmed:
+                audit.microstructure_passed += 1
+            else:
+                audit.microstructure_rejected += 1
 
             checks = dict(signal.checks)
             checks["Liquidity / spread"] = q.spread_pct <= CONFIG.max_spread_pct
