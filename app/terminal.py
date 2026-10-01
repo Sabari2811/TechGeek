@@ -151,9 +151,16 @@ class Terminal:
         print(f"  Current     ₹{position.current_price:,.2f}")
         pnl_color = GREEN if pnl >= 0 else RED
         print(f"  Live P&L    {Terminal._paint(f'₹{pnl:,.2f} ({pct:+.2f}%)', pnl_color)}")
+        if position.quote_stale:
+            print(f"  Quote       {Terminal._paint('STALE / REFRESHING', YELLOW)}")
+        else:
+            bid = f"₹{position.quote_bid:,.2f}" if position.quote_bid > 0 else "--"
+            ask = f"₹{position.quote_ask:,.2f}" if position.quote_ask > 0 else "--"
+            print(f"  Bid / Ask   {bid} / {ask} | Age {position.quote_age_seconds:.1f}s")
         print(f"  Stop        ₹{s.stop:,.2f}")
         print(f"  Target      ₹{s.target:,.2f}")
-        print(f"  Status      {Terminal._paint('● ACTIVE', GREEN)}")
+        status = '● ACTIVE' if not position.quote_stale else '● ACTIVE — QUOTE WAIT'
+        print(f"  Status      {Terminal._paint(status, GREEN if not position.quote_stale else YELLOW)}")
 
         print("\nCHECKLIST")
         for label, passed in getattr(s, "checks", {}).items():
