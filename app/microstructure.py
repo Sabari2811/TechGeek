@@ -48,7 +48,13 @@ class MicrostructureEngine:
             return 0.0
 
     @classmethod
-    def from_depth(cls, instrument: str, payload: dict, state: MicrostructureState) -> MicrostructureSnapshot | None:
+    def from_depth(
+        cls,
+        instrument: str,
+        payload: dict,
+        state: MicrostructureState,
+        require_levels: int | None = None,
+    ) -> MicrostructureSnapshot | None:
         depth = payload.get("market_depth", {}) if isinstance(payload, dict) else {}
         levels = depth.get("depth", []) or []
         if not levels:
@@ -70,11 +76,12 @@ class MicrostructureEngine:
                 bids.append((bp, bq))
             if ap > 0:
                 asks.append((ap, aq))
-        # Accept the provider's actual available ladder without fabricating
-        # missing levels. The live market-depth transport still requests the
-        # documented five-level endpoint, while replay/unit-test payloads may
-        # legitimately contain a shorter ladder.
+        # Never fabricate missing levels. Replay/unit-test callers may choose
+        # to accept a shorter real ladder, but the live entry path explicitly
+        # requires all five documented levels.
         if not bids or not asks:
+            return None
+        if require_levels is not None and min(len(bids), len(asks)) < require_levels:
             return None
 
         best_bid, _ = bids[0]
