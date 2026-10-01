@@ -146,6 +146,11 @@ class Position:
     quantity: int
     opened_at: datetime
     current_price: float = 0.0
+    quote_bid: float = 0.0
+    quote_ask: float = 0.0
+    quote_age_seconds: float = 0.0
+    quote_source: str = ""
+    quote_stale: bool = True
     exit_price: float = 0.0
     exit_reason: str = ""
 
