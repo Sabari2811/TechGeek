@@ -55,3 +55,11 @@ def test_parses_provider_bid_ask_quantity_variants():
     assert snap is not None
     assert snap.total_bid_qty == 500
     assert snap.total_ask_qty == 600
+
+
+def test_live_confirmation_requires_all_five_levels():
+    state = MicrostructureState()
+    payload = make_depth()
+    assert MicrostructureEngine.from_depth(
+        "NFO_1", payload, state, require_levels=5
+    ) is None
