@@ -230,3 +230,45 @@ def test_market_depth_falls_back_after_provider_error():
         ]
         await client.close()
     asyncio.run(scenario())
+
+
+def test_extract_live_quote_from_full_quote():
+    from app.market import _extract_live_quote
+
+    payload = {
+        "status": "success",
+        "data": {
+            "NFO_47273": {
+                "live_price": 12.34,
+                "top_bid_price": 12.30,
+                "top_ask_price": 12.40,
+            }
+        },
+    }
+    quote = _extract_live_quote(payload, "47273")
+    assert quote == {"ltp": 12.34, "bid": 12.30, "ask": 12.40}
+
+
+def test_live_quote_uses_full_quote_endpoint():
+    async def scenario():
+        full = {
+            "status": "success",
+            "data": {
+                "NFO_47273": {
+                    "live_price": 12.34,
+                    "top_bid_price": 12.30,
+                    "top_ask_price": 12.40,
+                }
+            },
+        }
+        client = IndstocksClient()
+        client.http = FakeHttp({}, full)
+        quote = await client.live_quote("47273")
+        assert quote["ltp"] == 12.34
+        assert quote["bid"] == 12.30
+        assert quote["ask"] == 12.40
+        assert quote["source"] == "full_quote"
+        assert client.http.paths == ["/market/quotes/full"]
+        await client.close()
+
+    asyncio.run(scenario())
