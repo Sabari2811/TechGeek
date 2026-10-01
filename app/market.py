@@ -26,6 +26,37 @@ class IndstocksClient:
             raise RuntimeError(payload)
         return payload["data"]
 
+
+    async def live_quote(self, security_id: str) -> dict:
+        """Fetch a fresh full quote for an open position.
+
+        Open-position monitoring must not depend on the option-chain snapshot.
+        The provider documents /market/quotes/full as a real-time quote endpoint
+        and its payload includes live_price and market_depth.
+        """
+        sid = str(security_id or "")
+        if not sid:
+            return {}
+        params = {"scrip-codes": f"NFO_{sid}"}
+        last_error = None
+        for attempt in range(2):
+            try:
+                r = await self.http.get("/market/quotes/full", params=params)
+                r.raise_for_status()
+                payload = r.json()
+                if payload.get("status") != "success":
+                    raise RuntimeError(f"quote status={payload.get('status')!r}")
+                quote = _extract_live_quote(payload, sid)
+                if quote.get("ltp", 0.0) > 0:
+                    quote["source"] = "full_quote"
+                    return quote
+                raise RuntimeError("full quote returned no live_price")
+            except Exception as exc:
+                last_error = exc
+                if attempt == 0:
+                    await asyncio.sleep(0.12)
+        raise RuntimeError(f"live quote unavailable: {last_error}")
+
     async def market_depth(self, security_ids: list[str]) -> dict:
         """Return verified provider depth without ever fabricating levels.
 
@@ -172,6 +203,28 @@ class IndstocksClient:
             async for raw in ws:
                 yield json.loads(raw)
 
+
+
+def _extract_live_quote(data: dict, security_id: str) -> dict:
+    """Extract only the requested instrument's live quote from provider data."""
+    sid = str(security_id)
+    keys = [f"NFO_{sid}", f"NFO:{sid}", f"NFO-{sid}", sid]
+    roots = [data]
+    if isinstance(data.get("data"), (dict, list)):
+        roots.append(data["data"])
+
+    for root in roots:
+        if not isinstance(root, dict):
+            continue
+        for key in keys:
+            item = root.get(key)
+            if isinstance(item, dict):
+                ltp = _num(item, "live_price", "ltp", "last_price", "lastPrice")
+                bid = _num(item, "top_bid_price", "bid_price", "bidPrice")
+                ask = _num(item, "top_ask_price", "ask_price", "askPrice")
+                return {"ltp": ltp, "bid": bid, "ask": ask}
+
+    return {}
 
 def _as_levels(value) -> list[dict]:
     if isinstance(value, list):
