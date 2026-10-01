@@ -257,49 +257,6 @@ class QuantEngine:
                     confidence,
                 )
 
-            # Established-trend continuation: a strong directional move can
-            # temporarily compress during a pullback/consolidation. The old
-            # gate only examined the latest 5 minutes, which could therefore
-            # classify a late-stage selloff as ACCUMULATION after a large
-            # intraday displacement. Use up to 15 minutes of timestamped
-            # context, while still requiring short-term directional agreement.
-            # This does not bypass probability/EV or live five-level depth.
-            observations = getattr(state, "spot_observations", [])
-            if len(observations) >= 60:
-                medium_obs = [
-                    (ts, price) for ts, price in observations
-                    if (latest - ts).total_seconds() <= 900
-                ]
-                medium_prices = cls._unique_prices([price for _, price in medium_obs])
-                if len(medium_prices) >= 30:
-                    medium_base = max(medium_prices[0], 1e-9)
-                    medium_move = (medium_prices[-1] - medium_prices[0]) / medium_base
-                    medium_deltas = [
-                        medium_prices[i] - medium_prices[i - 1]
-                        for i in range(1, len(medium_prices))
-                    ]
-                    medium_abs = sum(abs(d) for d in medium_deltas)
-                    medium_efficiency = (
-                        abs(medium_prices[-1] - medium_prices[0]) / medium_abs
-                        if medium_abs > 0 else 0.0
-                    )
-                    medium_direction = (
-                        "BULLISH" if medium_move > 0 else
-                        "BEARISH" if medium_move < 0 else "NEUTRAL"
-                    )
-                    if (
-                        abs(medium_move) >= 0.0015
-                        and medium_efficiency >= 0.30
-                        and medium_direction != "NEUTRAL"
-                        and net_fast * medium_move > 0
-                        and abs(net_fast) >= 0.00002
-                    ):
-                        confidence = min(
-                            0.93,
-                            0.62 + medium_efficiency * 0.20 + abs(medium_move) * 35.0
-                        )
-                        return "EARLY_CONFIRMATION", medium_direction, confidence
-
             if range_pct <= 0.0035 and abs(net_recent) <= 0.0012:
                 confidence = min(0.95, 0.55 + max(0.0, 0.0035 - range_pct) * 60.0)
                 return "ACCUMULATION", direction, confidence
