@@ -100,10 +100,32 @@ async def run():
             if execution.position:
                 p = execution.position
                 q = state.get_option(p.signal.strike, p.signal.option_type)
-                if q:
-                    p.current_price = q.ltp
-                    if q.ltp <= p.signal.stop:
-                        closed = await execution.exit(q.bid or q.ltp, "STOP LOSS")
+                live_quote = {}
+                quote_error = ""
+                try:
+                    # Open-position monitoring uses a dedicated real-time quote,
+                    # not the option-chain snapshot used by the strategy engine.
+                    live_quote = await client.live_quote(p.signal.security_id)
+                    p.current_price = live_quote["ltp"]
+                    p.quote_bid = live_quote.get("bid", 0.0)
+                    p.quote_ask = live_quote.get("ask", 0.0)
+                    p.quote_age_seconds = 0.0
+                    p.quote_source = live_quote.get("source", "full_quote")
+                    p.quote_stale = False
+                except Exception as exc:
+                    # Never silently treat the old option-chain LTP as current.
+                    # Keep the last observed price for display, but block
+                    # price-triggered exits until a fresh quote is available.
+                    p.quote_age_seconds = max(p.quote_age_seconds, CONFIG.stale_seconds + 1.0)
+                    p.quote_source = "stale"
+                    p.quote_stale = True
+                    quote_error = str(exc)
+
+                if not p.quote_stale:
+                    live_ltp = p.current_price
+                    exit_price = p.quote_bid if p.quote_bid > 0 else live_ltp
+                    if live_ltp <= p.signal.stop:
+                        closed = await execution.exit(exit_price, "STOP LOSS")
                         risk.record_trade(closed.realized_pnl)
                         learning.record(p.signal, closed.realized_pnl)
                         save_today(state.spot_history, today, execution.closed_trades)
@@ -111,8 +133,8 @@ async def run():
                         Terminal.closed(closed, state.spot)
                         await asyncio.sleep(1)
                         continue
-                    if q.ltp >= p.signal.target:
-                        closed = await execution.exit(q.bid or q.ltp, "TARGET")
+                    if live_ltp >= p.signal.target:
+                        closed = await execution.exit(exit_price, "TARGET")
                         risk.record_trade(closed.realized_pnl)
                         learning.record(p.signal, closed.realized_pnl)
                         save_today(state.spot_history, today, execution.closed_trades)
@@ -122,7 +144,12 @@ async def run():
                         continue
 
                 if not CONFIG.entries_allowed():
-                    price = q.bid if q and q.bid > 0 else (q.ltp if q else p.current_price)
+                    if not p.quote_stale and p.quote_bid > 0:
+                        price = p.quote_bid
+                    elif q and q.bid > 0:
+                        price = q.bid
+                    else:
+                        price = p.current_price
                     closed = await execution.exit(price, "SESSION SQUARE-OFF")
                     risk.record_trade(closed.realized_pnl)
                     learning.record(p.signal, closed.realized_pnl)
