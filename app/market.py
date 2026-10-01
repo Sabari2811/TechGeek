@@ -207,6 +207,14 @@ def _extract_market_depth_object(value, _seen=None) -> dict:
         return {}
     _seen.add(marker)
 
+    # Some INDstocks responses wrap the documented depth object one level
+    # deeper, e.g. market_depth -> NFO_<security_id> -> depth. Check for a
+    # direct depth/levels list before descending further so provider wrappers
+    # are normalized without fabricating or weakening the 5-level gate.
+    direct_levels = _as_levels(value.get("depth")) or _as_levels(value.get("levels"))
+    if direct_levels:
+        return {"market_depth": {"depth": direct_levels[:5]}}
+
     md = value.get("market_depth")
     if isinstance(md, dict):
         levels = _as_levels(md.get("depth")) or _as_levels(md.get("levels"))
