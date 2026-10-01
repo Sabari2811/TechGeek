@@ -289,16 +289,55 @@ def extract_market_depth(data: dict, security_id: str) -> dict:
     return _extract_market_depth_object(data)
 
 
+def _depth_shape(value, path="root", out=None, level=0) -> list[str]:
+    """Return a bounded, value-free description of a provider payload shape."""
+    if out is None:
+        out = []
+    if level > 4 or len(out) >= 40:
+        return out
+    if isinstance(value, dict):
+        for key, child in list(value.items())[:20]:
+            child_path = f"{path}.{key}"
+            if isinstance(child, dict):
+                out.append(f"{child_path}=object")
+                _depth_shape(child, child_path, out, level + 1)
+            elif isinstance(child, list):
+                out.append(f"{child_path}=list[{len(child)}]")
+                for i, item in enumerate(child[:5]):
+                    if isinstance(item, dict):
+                        item_path = f"{child_path}[{i}]"
+                        out.append(f"{item_path}=object")
+                        _depth_shape(item, item_path, out, level + 1)
+            else:
+                out.append(f"{child_path}={type(child).__name__}")
+    elif isinstance(value, list):
+        out.append(f"{path}=list[{len(value)}]")
+    return out
+
+
 def summarize_market_depth_payload(data: dict, security_id: str) -> str:
     sid = str(security_id)
     if not isinstance(data, dict):
         return f"response_type={type(data).__name__}"
+
     status = data.get("status")
     root = data.get("data") if isinstance(data.get("data"), dict) else data
     keys = list(root.keys())[:8] if isinstance(root, dict) else []
-    matched = [k for k in keys if str(k) in {f"NFO_{sid}", f"NFO:{sid}", f"NSE_{sid}", f"NSE:{sid}", sid}]
-    has_depth = bool(extract_market_depth(data, sid))
-    return f"status={status!r} keys={keys!r} matched={matched!r} depth_found={has_depth}"
+    matched = [k for k in keys if str(k) in {
+        f"NFO_{sid}", f"NFO:{sid}", f"NSE_{sid}", f"NSE:{sid}", sid
+    }]
+
+    depth = extract_market_depth(data, sid)
+    levels = depth.get("market_depth", {}).get("depth", []) if depth else []
+    level_count = len(levels) if isinstance(levels, list) else 0
+    shape = _depth_shape(root)
+    # Shape logging is deliberately value-free: no prices, quantities, token,
+    # or complete provider payload is written to the terminal.
+    shape_text = ",".join(shape[:20])
+    return (
+        f"status={status!r} keys={keys!r} matched={matched!r} "
+        f"depth_found={bool(depth)} depth_levels={level_count} shape=[{shape_text}]"
+    )
 
 
 def _num(raw: dict, *names: str) -> float:
