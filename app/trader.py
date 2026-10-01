@@ -166,7 +166,12 @@ async def run():
                 depth_data = await client.market_depth([q.security_id])
                 raw_depth = extract_market_depth(depth_data, q.security_id)
                 depth_diag = summarize_market_depth_payload(depth_data, q.security_id)
-                micro = MicrostructureEngine.from_depth(q.security_id, raw_depth, micro_state)
+                # Live entry confirmation requires the complete five-level
+                # ladder documented by INDstocks. Short ladders remain valid for
+                # replay/unit tests but can never authorize a live entry.
+                micro = MicrostructureEngine.from_depth(
+                    q.security_id, raw_depth, micro_state, require_levels=5
+                )
                 confirmed, micro_reason = MicrostructureEngine.confirmation(micro)
             except Exception as exc:
                 confirmed, micro_reason = False, f"depth feed unavailable: {exc}"
