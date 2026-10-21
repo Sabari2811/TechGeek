@@ -118,7 +118,7 @@ class ExecutionEngine:
                     })
                     return latest
                 record_order_event(tag, "terminal_no_fill", {"order_id": order_id, "status": self._order_status(latest)})
-                raise RuntimeError(f"Order finished without a fill: {self._order_status(latest)})
+                raise RuntimeError(f"Order finished without a fill: {self._order_status(latest)}")
             await asyncio.sleep(0.25)
 
         traded_qty = self._traded_quantity(latest or {})
