@@ -64,7 +64,7 @@
 - Added fail-closed handling when broker order-book lookup fails during reconciliation: it records the error, trips the entry kill switch, and raises instead of assuming the order state.
 - Added offline regression tests for filled-order reconciliation and broker order-book outage.
 - Latest commits: `71e843d7639c113069024ad14804a20f72766314` (explicit reconciliation), `b10698a7b6c729d8192ed3f6b857f18e238396dc` (tests), `7440fa8b2e0f09f456058681306bb95dcb52aff9` (order-book failures), `d3cdca4f27fa973c21037480c46ca5db0409c6f0` (failure regression test).
-- Validation: GitHub Actions run 39657557383 passed compile and the full test suite on Python 3.11, 3.12, and 3.14 for head `71544bb1c9264c3f7aa727e63072a568ec3e3256`. No local test suite has been run from the user's Windows environment. Keep PR #3 in draft pending code review and remaining recovery work.
+- Validation: GitHub Actions run 39657557383 passed compile and the full test suite on Python 3.11, 3.12, and 3.14 for head `71544bb1c9264c3f7aa727e63072a568ec3e3256`. No local test suite has been run from the user's Windows environment. PR #3 was merged into main; follow-up recovery limitations are tracked below.
 
 
 ## Execution replay instrumentation — 2026-10-22
@@ -88,7 +88,7 @@
 - Distinguishes paper-mode simulated fills from recorded live fill events. Even LIVE event reconciliation does not query the broker and must be compared with broker order book/positions before accounting or restart recovery is considered complete.
 - Added tests for partial live exit, complete multi-fill live exit, and paper-mode classification.
 - This work does not recover positions from a restart, query broker truth, or change the microstructure gate. No live connection/order used; live routing remains disabled; `data/instruments/fno.csv` remains unchanged.
-- PR #6 was merged to main as commit `594ea1f6d13fa51ddcacd6ab36565936638145aa` after all Python 3.11/3.12/3.14 matrix jobs passed on the final PR head (`080b2d4f3aec1eabf5101e0c715b9abadc6b54b5`). Post-merge main CI run `39662361715` was queued at the time this note was written.
+- PR #6 merged to main as commit `594ea1f6d13fa51ddcacd6ab36565936638145aa`; all Python 3.11/3.12/3.14 matrix jobs passed on the final PR head and post-merge main CI run `39662361715` passed.
 
 
 ### PR #6 CI issue and fix — 2026-10-22
@@ -103,4 +103,12 @@
 - Original PR #4 could not merge because its handoff changes conflicted with later main updates. A clean port branch `fix/market-data-integrity-v2` was created from current main and the code/tests/workflow changes were reapplied without overwriting current execution-replay changes in `app/trader.py`.
 - Includes fail-closed quote validation, exact contract identity and lot-size checks, stale-price square-off guard, regression tests, and CI action/runner maintenance.
 - Provider event-time schema is still unverified; receive time is not provider event freshness. No live API/token/orders used. Five-level gate and `data/instruments/fno.csv` unchanged.
-- CI pending for the port branch. Do not merge until all matrix jobs pass and the diff is reviewed.
+- PR #7 merged to main as commit `986881bb1a94d9eb24e622088c229590b630ccac` after its Python 3.11/3.12/3.14 CI run `39662819234` passed. Post-merge main CI run `39663019084` was queued when this handoff update began; verify it before claiming final green status.
+
+
+## Current repository state — 2026-10-22
+
+- PR #7 is merged to `main`; it ports the market-data integrity, exact contract matching, quote sanity, and stale-price square-off guard changes onto the latest base.
+- PR #4 is closed as superseded by PR #7 to avoid keeping a conflicting duplicate open.
+- Live routing remains disabled. The provider's event-time schema is not verified, so the recorded quote receive time is not proof of market-event freshness.
+- Important remaining safety limitation: startup deliberately blocks on unresolved order journal entries, but open broker positions are not automatically reconstructed or flattened. No broker positions endpoint has been verified in this repo; do not invent one. Next work should add a read-only reconciliation report only against documented/verified broker responses, and keep manual position confirmation required.
