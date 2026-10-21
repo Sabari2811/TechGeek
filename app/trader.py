@@ -126,6 +126,13 @@ async def run():
                     exit_price = p.quote_bid if p.quote_bid > 0 else live_ltp
                     if live_ltp <= p.signal.stop:
                         closed = await execution.exit(exit_price, "STOP LOSS")
+                        if closed is None:
+                            Terminal.waiting(
+                                state.spot,
+                                f"Partial stop exit fill; {execution.position.quantity} units remain open.",
+                            )
+                            await asyncio.sleep(CONFIG.poll_seconds)
+                            continue
                         risk.record_trade(closed.realized_pnl)
                         learning.record(p.signal, closed.realized_pnl)
                         save_today(state.spot_history, today, execution.closed_trades)
@@ -135,6 +142,13 @@ async def run():
                         continue
                     if live_ltp >= p.signal.target:
                         closed = await execution.exit(exit_price, "TARGET")
+                        if closed is None:
+                            Terminal.waiting(
+                                state.spot,
+                                f"Partial target exit fill; {execution.position.quantity} units remain open.",
+                            )
+                            await asyncio.sleep(CONFIG.poll_seconds)
+                            continue
                         risk.record_trade(closed.realized_pnl)
                         learning.record(p.signal, closed.realized_pnl)
                         save_today(state.spot_history, today, execution.closed_trades)
@@ -151,6 +165,13 @@ async def run():
                     else:
                         price = p.current_price
                     closed = await execution.exit(price, "SESSION SQUARE-OFF")
+                    if closed is None:
+                        Terminal.waiting(
+                            state.spot,
+                            f"Partial square-off fill; {execution.position.quantity} units remain open.",
+                        )
+                        await asyncio.sleep(CONFIG.poll_seconds)
+                        continue
                     risk.record_trade(closed.realized_pnl)
                     learning.record(p.signal, closed.realized_pnl)
                     save_today(state.spot_history, today, execution.closed_trades)
