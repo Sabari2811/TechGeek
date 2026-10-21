@@ -125,6 +125,23 @@ async def run():
                     p.quote_age_seconds = 0.0
                     p.quote_source = live_quote.get("source", "full_quote")
                     p.quote_stale = False
+                    record_audit_event("position_quote", {
+                        "security_id": p.signal.security_id,
+                        "symbol": p.signal.symbol,
+                        "option_type": p.signal.option_type,
+                        "strike": p.signal.strike,
+                        "opened_at": p.opened_at.isoformat(),
+                        "quantity": p.quantity,
+                        "entry_price": p.entry_price,
+                        "stop_price": p.signal.stop,
+                        "target_price": p.signal.target,
+                        "ltp": p.current_price,
+                        "bid": p.quote_bid,
+                        "ask": p.quote_ask,
+                        "quote_source": p.quote_source,
+                        "quote_age_seconds": p.quote_age_seconds,
+                        "quote_stale": False,
+                    })
                 except Exception as exc:
                     # Never silently treat the old option-chain LTP as current.
                     # Keep the last observed price for display, but block
@@ -304,6 +321,26 @@ async def run():
                 Terminal.waiting(state.spot, "Candidate rejected: position size is below one lot", checks)
                 await asyncio.sleep(CONFIG.poll_seconds)
                 continue
+
+            record_audit_event("signal_accepted_for_execution", {
+                "security_id": signal.security_id,
+                "symbol": signal.symbol,
+                "option_type": signal.option_type,
+                "strike": signal.strike,
+                "expiry": expiry,
+                "spot": state.spot,
+                "entry_price": signal.entry,
+                "stop_price": signal.stop,
+                "target_price": signal.target,
+                "quantity": qty,
+                "lot_size": lot_size,
+                "probability": signal.probability,
+                "expected_value": signal.expected_value,
+                "net_expected_value": signal.net_expected_value,
+                "microstructure_confirmed": confirmed,
+                "microstructure_reason": micro_reason,
+                "depth_levels": len(raw_depth.get("market_depth", {}).get("depth", [])),
+            })
 
             try:
                 p = await execution.enter(signal, qty)
