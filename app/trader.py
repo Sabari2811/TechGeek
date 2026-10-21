@@ -221,6 +221,8 @@ async def run():
                 continue
 
             depth_diag = ""
+            depth_data = {}
+            raw_depth = {}
             try:
                 # market_depth() owns the documented REST/full-quote/WebSocket
                 # fallback chain. Do not issue a second duplicate fallback here.
@@ -241,8 +243,8 @@ async def run():
                 "security_id": q.security_id,
                 "strike": q.strike,
                 "option_type": q.option_type,
-                "provider_payload": depth_data if "depth_data" in locals() else {},
-                "normalized_depth": raw_depth if "raw_depth" in locals() else {},
+                "provider_payload": depth_data,
+                "normalized_depth": raw_depth,
                 "confirmed": confirmed,
                 "reason": micro_reason,
                 "depth_diagnostic": depth_diag,
