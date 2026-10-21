@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+import math
 from datetime import datetime
 from .config import CONFIG
 from .models import MarketState, TradeSignal
@@ -18,8 +19,11 @@ def calculate_stop_target(entry_price: float, spot_price: float, reward_risk: fl
     rather than last-traded price so risk sizing and the target use the same
     price basis as the proposed trade.
     """
-    if not all(map(lambda value: isinstance(value, (int, float)) and value > 0,
-                   (entry_price, spot_price, reward_risk))):
+    values = (entry_price, spot_price, reward_risk)
+    if not all(
+        isinstance(value, (int, float)) and math.isfinite(value) and value > 0
+        for value in values
+    ):
         raise ValueError("entry price, spot price, and reward/risk must be positive")
     stop = max(entry_price * 0.75, entry_price - spot_price * 0.001)
     if stop <= 0 or stop >= entry_price:
