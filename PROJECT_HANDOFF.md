@@ -96,3 +96,11 @@
 - First PR #6 CI run failed with 3 failures in `tests/test_execution_replay.py`; 91 tests passed. The added fixtures joined JSON objects with the literal characters `\\n` rather than actual newline separators, so the JSONL loader correctly ignored the combined invalid line.
 - Fixed all three fixture writers to join with actual newline characters in commit `458b1d70853ad36f375487330efa56c958419d11`.
 - The corrected final PR head passed all three Python 3.11/3.12/3.14 CI jobs in run `39662099853`; the post-merge main workflow is tracked separately.
+
+
+## Market-data integrity ported to current main — 2026-10-22
+
+- Original PR #4 could not merge because its handoff changes conflicted with later main updates. A clean port branch `fix/market-data-integrity-v2` was created from current main and the code/tests/workflow changes were reapplied without overwriting current execution-replay changes in `app/trader.py`.
+- Includes fail-closed quote validation, exact contract identity and lot-size checks, stale-price square-off guard, regression tests, and CI action/runner maintenance.
+- Provider event-time schema is still unverified; receive time is not provider event freshness. No live API/token/orders used. Five-level gate and `data/instruments/fno.csv` unchanged.
+- CI pending for the port branch. Do not merge until all matrix jobs pass and the diff is reviewed.
