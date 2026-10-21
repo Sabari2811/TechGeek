@@ -75,20 +75,6 @@ def mark_reconciled(client_order_ref: str, reason: str) -> Path:
     )
 
 
-if __name__ == "__main__":
-    import argparse
-
-    parser = argparse.ArgumentParser(
-        description="Order journal reconciliation. Confirm broker orders and positions first."
-    )
-    parser.add_argument("--reconcile", metavar="CLIENT_ORDER_REF", required=True)
-    parser.add_argument("--reason", required=True)
-    args = parser.parse_args()
-    mark_reconciled(args.reconcile, args.reason)
-    print(f"Recorded reconciliation for {args.reconcile}.")
-
-
-
 def read_only_broker_order_reconciliation(broker_orders, root: Path | None = None) -> dict:
     """Compare journaled order IDs with a supplied broker order-book snapshot.
 
@@ -179,3 +165,40 @@ def _safe_nonnegative_int(value) -> int:
     except (TypeError, ValueError, OverflowError):
         return 0
     return max(0, number)
+
+
+
+if __name__ == "__main__":
+    import argparse
+    import asyncio
+    import json
+
+    parser = argparse.ArgumentParser(
+        description="Order journal tools. Broker order-book report is read-only; position confirmation remains manual."
+    )
+    action = parser.add_mutually_exclusive_group(required=True)
+    action.add_argument("--reconcile", metavar="CLIENT_ORDER_REF", help="Record operator-confirmed reconciliation (after checking broker orders AND positions)")
+    action.add_argument("--report-broker-order-book", action="store_true", help="Fetch the broker order book and print a read-only journal comparison")
+    parser.add_argument("--reason", help="Required operator reason when using --reconcile")
+    args = parser.parse_args()
+
+    if args.report_broker_order_book:
+        from .market import IndstocksClient
+        from .config import CONFIG
+
+        if not CONFIG.access_token:
+            parser.error("INDSTOCKS_ACCESS_TOKEN is required for a read-only broker order-book report")
+        async def run_report():
+            client = IndstocksClient()
+            try:
+                orders = await client.order_book()
+                report = read_only_broker_order_reconciliation(orders)
+                print(json.dumps(report, indent=2, sort_keys=True))
+            finally:
+                await client.close()
+        asyncio.run(run_report())
+    else:
+        if not args.reason or not args.reason.strip():
+            parser.error("--reason is required with --reconcile")
+        mark_reconciled(args.reconcile, args.reason)
+        print(f"Recorded operator reconciliation for {args.reconcile}.")
