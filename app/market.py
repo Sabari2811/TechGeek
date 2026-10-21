@@ -250,6 +250,36 @@ class IndstocksClient:
                 raise RuntimeError("Broker position row has non-finite net_qty")
         return positions
 
+    async def order_trades(self, order_id: str, segment: str = "DERIVATIVE") -> list[dict]:
+        """Fetch documented fills for one broker order (GET-only)."""
+        if not str(order_id or "").strip():
+            raise ValueError("order_id is required")
+        normalized_segment = str(segment).strip().upper()
+        if normalized_segment not in {"EQUITY", "DERIVATIVE", "COMMODITY"}:
+            raise ValueError("segment must be EQUITY, DERIVATIVE, or COMMODITY")
+        r = await self.http.get(
+            "/order/trades",
+            json={"order_id": str(order_id), "segment": normalized_segment},
+        )
+        r.raise_for_status()
+        payload = r.json()
+        if not isinstance(payload, dict) or payload.get("status") != "success":
+            raise RuntimeError("Broker order-trades response status was not success")
+        fills = payload.get("data")
+        if not isinstance(fills, list) or any(not isinstance(fill, dict) for fill in fills):
+            raise RuntimeError("Broker order-trades response did not match the documented fill schema")
+        for fill in fills:
+            if "quantity" not in fill or "price" not in fill:
+                raise RuntimeError("Broker fill row missing documented quantity/price fields")
+            try:
+                quantity = int(fill["quantity"])
+                price = float(fill["price"])
+            except (TypeError, ValueError, OverflowError) as exc:
+                raise RuntimeError("Broker fill row has invalid quantity/price") from exc
+            if quantity <= 0 or not math.isfinite(price) or price <= 0:
+                raise RuntimeError("Broker fill row has non-positive or non-finite quantity/price")
+        return fills
+
     async def stream(self, instruments: list[str]):
         url = "wss://ws-prices.indstocks.com/api/v1/ws/prices"
         async with websockets.connect(url, additional_headers={"Authorization":CONFIG.access_token}, ping_interval=20, ping_timeout=10) as ws:

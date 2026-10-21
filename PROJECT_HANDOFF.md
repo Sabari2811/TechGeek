@@ -182,3 +182,12 @@
 - PR #13 merged to main as `bc183d4909a5fc3548270ee10ac72a760b95e412`; its final-head Python 3.11/3.12/3.14 matrix passed (run `39664281748`). Draft duplicate PR #12 is closed as superseded.
 - Latest quote guard rejects slow REST full-quote responses based on round-trip latency only. Official provider docs do not specify an event timestamp for this REST response; provider event-time freshness remains unresolved.
 - Continue only with documented provider endpoints, offline tests and read-only reconciliation. No live token used. Live order routing remains disabled; five-level microstructure gate and `data/instruments/fno.csv` unchanged.
+
+
+## Read-only per-order fill reconciliation — 2026-10-22
+
+- Official INDstocks order docs specify `GET /order/trades` with JSON body `order_id` and `segment`, returning individual `quantity`, `price`, and `trade_date` fields: https://api-docs.indstocks.com/normal_orders/
+- Added strict `IndstocksClient.order_trades()` validation for response envelope, fill list, positive integer quantities, and finite positive prices.
+- Extended the read-only report to retrieve fill details for unresolved journaled order IDs, compute total fill quantity and weighted average price, and compare fill quantity against the order-book traded quantity. Mismatches require review; this does not auto-resolve journal state or prove position flatness.
+- Added tests for GET body shape, fill schema, multi-fill totals, and mismatch detection. CI pending on `feat/read-only-fill-reconciliation`.
+- No live token used. Live routing remains disabled; five-level gate and `data/instruments/fno.csv` unchanged.

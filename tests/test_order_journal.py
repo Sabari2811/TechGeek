@@ -143,7 +143,7 @@ def test_read_only_reconciliation_blocks_invalid_position_quantity(tmp_path, mon
     assert report["reason"] == "non_finite_position_net_qty"
 
 
-def test_fetch_read_only_broker_reconciliation_fetches_both_snapshots():
+def test_fetch_read_only_broker_reconciliation_fetches_both_snapshots(tmp_path):
     class FakeClient:
         def __init__(self):
             self.calls = []
@@ -158,14 +158,14 @@ def test_fetch_read_only_broker_reconciliation_fetches_both_snapshots():
 
     import asyncio
     client = FakeClient()
-    report = asyncio.run(order_journal.fetch_read_only_broker_reconciliation(client))
+    report = asyncio.run(order_journal.fetch_read_only_broker_reconciliation(client, root=tmp_path))
     assert client.calls == ["orders", "positions"]
     assert report["broker_positions_checked"] is True
     assert report["open_positions"] == []
     assert report["read_only"] is True
 
 
-def test_fetch_read_only_broker_reconciliation_propagates_snapshot_failure():
+def test_fetch_read_only_broker_reconciliation_propagates_snapshot_failure(tmp_path):
     class FakeClient:
         async def order_book(self):
             return []
@@ -176,4 +176,37 @@ def test_fetch_read_only_broker_reconciliation_propagates_snapshot_failure():
     import asyncio
     import pytest
     with pytest.raises(RuntimeError, match="position endpoint unavailable"):
-        asyncio.run(order_journal.fetch_read_only_broker_reconciliation(FakeClient()))
+        asyncio.run(order_journal.fetch_read_only_broker_reconciliation(FakeClient(), root=tmp_path))
+
+
+
+def test_read_only_reconciliation_reports_trade_fill_totals(tmp_path, monkeypatch):
+    monkeypatch.setattr(order_journal, "JOURNAL_ROOT", tmp_path)
+    order_journal.record_order_event("entry-1", "intent", {"requested_quantity": 10, "security_id": "NFO1"})
+    order_journal.record_order_event("entry-1", "broker_order_id_received", {"order_id": "ORD-1"})
+    order_journal.record_order_event("entry-1", "terminal_partial_fill", {
+        "order_id": "ORD-1", "traded_quantity": 10
+    })
+    report = order_journal.read_only_broker_order_reconciliation(
+        [{"id": "ORD-1", "status": "SUCCESS", "traded_qty": 10}],
+        broker_trades={"ORD-1": [
+            {"quantity": 4, "price": 105},
+            {"quantity": 6, "price": 106},
+        ]},
+    )
+    item = report["orders"][0]
+    assert item["trade_fill_count"] == 2
+    assert item["trade_fill_quantity"] == 10
+    assert item["trade_fill_average_price"] == 105.6
+    assert item["fill_reconciliation"] == "MATCHED_TO_ORDER_BOOK_QUANTITY"
+
+
+def test_read_only_reconciliation_flags_trade_fill_quantity_mismatch(tmp_path, monkeypatch):
+    monkeypatch.setattr(order_journal, "JOURNAL_ROOT", tmp_path)
+    order_journal.record_order_event("entry-1", "intent", {"requested_quantity": 10})
+    order_journal.record_order_event("entry-1", "broker_order_id_received", {"order_id": "ORD-1"})
+    report = order_journal.read_only_broker_order_reconciliation(
+        [{"id": "ORD-1", "status": "SUCCESS", "traded_qty": 10}],
+        broker_trades={"ORD-1": [{"quantity": 5, "price": 100}]},
+    )
+    assert report["orders"][0]["fill_reconciliation"] == "FILL_QUANTITY_MISMATCH_REQUIRES_REVIEW"

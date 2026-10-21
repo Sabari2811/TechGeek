@@ -75,7 +75,7 @@ def mark_reconciled(client_order_ref: str, reason: str) -> Path:
     )
 
 
-def read_only_broker_order_reconciliation(broker_orders, root: Path | None = None, broker_positions=None) -> dict:
+def read_only_broker_order_reconciliation(broker_orders, root: Path | None = None, broker_positions=None, broker_trades=None) -> dict:
     """Compare journaled order IDs with a supplied broker order-book snapshot.
 
     This function is intentionally read-only: it never marks journal entries
@@ -90,6 +90,11 @@ def read_only_broker_order_reconciliation(broker_orders, root: Path | None = Non
         or any(not isinstance(row, dict) for row in broker_positions)
     ):
         raise TypeError("broker_positions must be a list of position objects returned by the documented positions endpoint")
+    if broker_trades is not None and (
+        not isinstance(broker_trades, dict)
+        or any(not isinstance(fills, list) for fills in broker_trades.values())
+    ):
+        raise TypeError("broker_trades must map broker order IDs to fill lists")
 
     latest_by_ref: dict[str, dict] = {}
     root = root or JOURNAL_ROOT
@@ -145,7 +150,7 @@ def read_only_broker_order_reconciliation(broker_orders, root: Path | None = Non
             })
             continue
         broker = matches[0]
-        results.append({
+        item = {
             "client_order_ref": ref,
             "order_id": str(order_id),
             "journal_event": row.get("event"),
@@ -153,7 +158,42 @@ def read_only_broker_order_reconciliation(broker_orders, root: Path | None = Non
             "broker_traded_quantity": _safe_nonnegative_int(broker.get("traded_qty", broker.get("filled_quantity", 0))),
             "journal_traded_quantity": _safe_nonnegative_int(details.get("traded_quantity", details.get("filled_quantity", 0))),
             "status": "MATCHED_ORDER_ONLY_MANUAL_POSITION_CHECK_REQUIRED",
-        })
+        }
+        if broker_trades is not None:
+            fills = broker_trades.get(str(order_id))
+            if fills is None:
+                item["fill_reconciliation"] = "TRADE_FILL_SNAPSHOT_MISSING"
+            else:
+                total_quantity = 0
+                total_value = 0.0
+                invalid_fill = False
+                for fill in fills:
+                    try:
+                        quantity = int(fill.get("quantity"))
+                        price = float(fill.get("price"))
+                    except (AttributeError, TypeError, ValueError, OverflowError):
+                        invalid_fill = True
+                        break
+                    if quantity <= 0 or not __import__("math").isfinite(price) or price <= 0:
+                        invalid_fill = True
+                        break
+                    total_quantity += quantity
+                    total_value += quantity * price
+                if invalid_fill:
+                    item["fill_reconciliation"] = "INVALID_TRADE_FILL_SNAPSHOT"
+                else:
+                    item["trade_fill_count"] = len(fills)
+                    item["trade_fill_quantity"] = total_quantity
+                    item["trade_fill_average_price"] = total_value / total_quantity if total_quantity else None
+                    item["trade_fill_quantity_matches_order_book"] = (
+                        total_quantity == item["broker_traded_quantity"]
+                    )
+                    item["fill_reconciliation"] = (
+                        "MATCHED_TO_ORDER_BOOK_QUANTITY"
+                        if total_quantity == item["broker_traded_quantity"]
+                        else "FILL_QUANTITY_MISMATCH_REQUIRES_REVIEW"
+                    )
+        results.append(item)
 
     open_positions = []
     if broker_positions is not None:
@@ -219,11 +259,23 @@ def _safe_nonnegative_int(value) -> int:
     return max(0, number)
 
 
-async def fetch_read_only_broker_reconciliation(client) -> dict:
-    """Fetch order and derivative-intraday position snapshots without side effects."""
+async def fetch_read_only_broker_reconciliation(client, root: Path | None = None) -> dict:
+    """Fetch read-only order, position and per-order fill snapshots."""
     orders = await client.order_book()
     positions = await client.intraday_derivative_positions()
-    return read_only_broker_order_reconciliation(orders, broker_positions=positions)
+    pending = unresolved_orders(root)
+    order_ids = set()
+    for row in pending.values():
+        details = row.get("details", {}) if isinstance(row, dict) else {}
+        order_id = details.get("order_id") if isinstance(details, dict) else None
+        if order_id:
+            order_ids.add(str(order_id))
+    trade_fills = {}
+    for order_id in sorted(order_ids):
+        trade_fills[order_id] = await client.order_trades(order_id, "DERIVATIVE")
+    return read_only_broker_order_reconciliation(
+        orders, root=root, broker_positions=positions, broker_trades=trade_fills
+    )
 
 
 
@@ -250,9 +302,7 @@ if __name__ == "__main__":
         async def run_report():
             client = IndstocksClient()
             try:
-                orders = await client.order_book()
-                positions = await client.intraday_derivative_positions()
-                report = read_only_broker_order_reconciliation(orders, broker_positions=positions)
+                report = await fetch_read_only_broker_reconciliation(client)
                 print(json.dumps(report, indent=2, sort_keys=True))
             finally:
                 await client.close()

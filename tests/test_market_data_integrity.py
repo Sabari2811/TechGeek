@@ -187,3 +187,40 @@ def test_live_quote_rejects_response_exceeding_stale_threshold(monkeypatch):
         await client.close()
 
     asyncio.run(scenario())
+
+
+def test_order_trades_uses_documented_get_body_and_validates_fills():
+    payload = {"status": "success", "data": [
+        {"fill_id": 1, "quantity": 4, "price": 105.0, "trade_date": "2026-10-22T10:00:00+05:30"},
+        {"fill_id": 2, "quantity": 6, "price": 106.0, "trade_date": "2026-10-22T10:00:01+05:30"},
+    ]}
+
+    async def scenario():
+        client = IndstocksClient()
+        client.http = FakeHttp(payload)
+        fills = await client.order_trades("ORD-123", "DERIVATIVE")
+        assert len(fills) == 2
+        assert client.http.calls == [(
+            "/order/trades",
+            {"json": {"order_id": "ORD-123", "segment": "DERIVATIVE"}},
+        )]
+        await client.close()
+
+    asyncio.run(scenario())
+
+
+def test_order_trades_rejects_non_positive_fill_values():
+    payload = {"status": "success", "data": [{"quantity": 0, "price": 10}]}
+
+    async def scenario():
+        client = IndstocksClient()
+        client.http = FakeHttp(payload)
+        try:
+            await client.order_trades("ORD-123")
+        except RuntimeError as exc:
+            assert "non-positive" in str(exc)
+        else:
+            raise AssertionError("invalid fill quantity must be rejected")
+        await client.close()
+
+    asyncio.run(scenario())
