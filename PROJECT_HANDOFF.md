@@ -189,5 +189,13 @@
 - Official INDstocks order docs specify `GET /order/trades` with JSON body `order_id` and `segment`, returning individual `quantity`, `price`, and `trade_date` fields: https://api-docs.indstocks.com/normal_orders/
 - Added strict `IndstocksClient.order_trades()` validation for response envelope, fill list, positive integer quantities, and finite positive prices.
 - Extended the read-only report to retrieve fill details for unresolved journaled order IDs, compute total fill quantity and weighted average price, and compare fill quantity against the order-book traded quantity. Mismatches require review; this does not auto-resolve journal state or prove position flatness.
-- Added tests for GET body shape, fill schema, multi-fill totals, and mismatch detection. CI pending on `feat/read-only-fill-reconciliation`.
+- Added tests for GET body shape, fill schema, multi-fill totals, and mismatch detection. PR #15 merged as `30e630a7c2a3b02d967f7fd75b31af47a47aa103`; all Python 3.11/3.12/3.14 jobs passed on its exact head in run `39664690399`.
 - No live token used. Live routing remains disabled; five-level gate and `data/instruments/fno.csv` unchanged.
+
+
+## Latest fill-reconciliation update — 2026-10-22
+
+- PR #15 merged to main as `30e630a7c2a3b02d967f7fd75b31af47a47aa103` after all Python 3.11/3.12/3.14 jobs passed on its final head (run `39664690399`). Draft duplicate PR #14 is closed as superseded.
+- Read-only reconciliation now checks order-book status, documented derivative-intraday position snapshot, and per-order trade fills for unresolved journaled order IDs. It compares fill quantity against the order book and flags mismatches for manual review.
+- It still does not auto-clear the kill switch or mark journal records reconciled. Startup stays blocked until operator verification. The position snapshot only covers DERIVATIVE/INTRADAY; review all relevant segments/products and current broker state before manually clearing.
+- Live routing remains disabled. No live token or broker account was used during development. Five-level gate and `data/instruments/fno.csv` unchanged.
