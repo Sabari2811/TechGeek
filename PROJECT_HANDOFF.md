@@ -65,3 +65,16 @@
 - Added offline regression tests for filled-order reconciliation and broker order-book outage.
 - Latest commits: `71e843d7639c113069024ad14804a20f72766314` (explicit reconciliation), `b10698a7b6c729d8192ed3f6b857f18e238396dc` (tests), `7440fa8b2e0f09f456058681306bb95dcb52aff9` (order-book failures), `d3cdca4f27fa973c21037480c46ca5db0409c6f0` (failure regression test).
 - Validation: GitHub Actions run 39657557383 passed compile and the full test suite on Python 3.11, 3.12, and 3.14 for head `71544bb1c9264c3f7aa727e63072a568ec3e3256`. No local test suite has been run from the user's Windows environment. Keep PR #3 in draft pending code review and remaining recovery work.
+
+
+## Follow-up branch: market-data integrity and CI maintenance
+
+- Base: merged `main` at `4dcb174b4cee1260a7a33579b6aed6c0ef34c1f6`.
+- Branch: `fix/market-data-integrity`.
+- `app/market.py`: live quote extraction rejects non-finite/non-positive LTP, invalid negative/non-finite bid/ask, and locked/crossed bid/ask. Successful full-quote responses include a UTC receive timestamp; this is response-receive time, **not proof of provider event freshness**.
+- `contract_lot_size` no longer blindly trusts the first instruments-search row. It requires exactly one row whose expiry, strike and option type match the requested contract and whose lot size is a positive integer. If provider identity fields are absent or ambiguous, it fails closed. The provider's real response schema still needs confirmation with a genuine response sample (no token requested).
+- Added `tests/test_market_data_integrity.py` for malformed quote prices, crossed/locked markets, exact contract matching, missing identity fields, and ambiguous results.
+- `.github/workflows/tests.yml`: updated checkout/setup-python actions to Node 24 compatible versions and pinned the runner to Ubuntu 24.04 to avoid the reported Node 20 and ubuntu-latest migration warnings. CI must verify the action versions and Python matrix.
+- This branch does not modify `data/instruments/fno.csv`, weaken the five-level gate, use a live API token, or enable real order routing.
+- Remaining known issues: source/provider timestamp freshness still needs provider schema evidence; square-off can still use unsafe fallback prices when the quote is stale; open-position reconstruction after restart remains manual; replay is not yet a realistic fill/P&L simulator.
+- Validation: pending GitHub Actions for this branch. Do not merge until the current head is green.
