@@ -189,6 +189,9 @@ class ExecutionEngine:
             "entry_price": entry,
             "requested_quantity": quantity,
             "filled_quantity": qty,
+            "position_opened_at": self.position.opened_at.isoformat(),
+            "stop_price": signal.stop,
+            "target_price": signal.target,
             "mode": CONFIG.mode,
         })
         return self.position
@@ -230,6 +233,11 @@ class ExecutionEngine:
             "remaining_quantity": p.quantity,
             "cumulative_exit_quantity": p.exit_filled_quantity,
             "cumulative_exit_proceeds": p.exit_proceeds,
+            "position_opened_at": p.opened_at.isoformat(),
+            "entry_price": p.entry_price,
+            "initial_quantity": p.initial_quantity,
+            "stop_price": p.signal.stop,
+            "target_price": p.signal.target,
             "mode": CONFIG.mode,
         })
         if p.quantity > 0:
