@@ -72,7 +72,16 @@ class ExecutionEngine:
         }
         latest = None
         for attempt in range(10):
-            latest = await self._find_order(order_id)
+            try:
+                latest = await self._find_order(order_id)
+            except Exception as exc:
+                record_order_event(tag, "reconciliation_error", {
+                    "order_id": order_id, "error": str(exc), "attempt": attempt + 1,
+                })
+                set_kill_switch(True, f"order-book reconciliation failed for {order_id}")
+                raise RuntimeError(
+                    f"Cannot reconcile broker order {order_id}; entry kill switch enabled"
+                ) from exc
             if latest:
                 latest_status = self._order_status(latest)
                 traded_qty = self._traded_quantity(latest)
@@ -94,7 +103,14 @@ class ExecutionEngine:
         # Cancel the unfilled remainder, then reconcile again. A cancel request
         # is not itself proof that the order is terminal or that no more fills
         # can arrive.
-        latest = await self._find_order(order_id)
+        try:
+            latest = await self._find_order(order_id)
+        except Exception as exc:
+            record_order_event(tag, "reconciliation_error", {"order_id": order_id, "error": str(exc)})
+            set_kill_switch(True, f"order-book reconciliation failed for {order_id}")
+            raise RuntimeError(
+                f"Cannot reconcile broker order {order_id} before cancellation; entry kill switch enabled"
+            ) from exc
         if latest and self._order_status(latest) not in terminal:
             try:
                 await self.client.cancel_order(order_id)
@@ -105,8 +121,17 @@ class ExecutionEngine:
                     f"(order_id={order_id}): {exc}"
                 ) from exc
 
-        for _ in range(4):
-            latest = await self._find_order(order_id)
+        for attempt in range(4):
+            try:
+                latest = await self._find_order(order_id)
+            except Exception as exc:
+                record_order_event(tag, "reconciliation_error", {
+                    "order_id": order_id, "error": str(exc), "after_cancel_attempt": attempt + 1,
+                })
+                set_kill_switch(True, f"order-book reconciliation failed for {order_id} after cancel")
+                raise RuntimeError(
+                    f"Cannot confirm order {order_id} after cancellation; entry kill switch enabled"
+                ) from exc
             if latest and self._order_status(latest) in terminal:
                 traded_qty = self._traded_quantity(latest)
                 if traded_qty > 0:
