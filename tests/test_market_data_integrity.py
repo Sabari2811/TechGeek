@@ -1,4 +1,5 @@
 import asyncio
+from types import SimpleNamespace
 
 from app.market import IndstocksClient, _extract_live_quote
 
@@ -130,6 +131,59 @@ def test_intraday_derivative_positions_rejects_bad_schema():
             assert "security_id/net_qty" in str(exc)
         else:
             raise AssertionError("positions missing net_qty must be rejected")
+        await client.close()
+
+    asyncio.run(scenario())
+
+
+def test_live_quote_records_response_latency_and_freshness_basis(monkeypatch):
+    import app.market as market_module
+    monkeypatch.setattr(
+        market_module,
+        "CONFIG",
+        SimpleNamespace(base_url="https://example.invalid", access_token="unused", stale_seconds=2.0),
+    )
+    payload = {"status": "success", "data": {"NFO_42": {
+        "live_price": 100, "top_bid_price": 99.9, "top_ask_price": 100.1
+    }}}
+
+    async def scenario():
+        client = IndstocksClient()
+        client.http = FakeHttp(payload)
+        quote = await client.live_quote("42")
+        assert quote["response_latency_seconds"] >= 0
+        assert quote["freshness_basis"] == "request_round_trip_time_only"
+        assert quote["source"] == "full_quote"
+        await client.close()
+
+    asyncio.run(scenario())
+
+
+def test_live_quote_rejects_response_exceeding_stale_threshold(monkeypatch):
+    import app.market as market_module
+    monkeypatch.setattr(
+        market_module,
+        "CONFIG",
+        SimpleNamespace(base_url="https://example.invalid", access_token="unused", stale_seconds=0.001),
+    )
+    payload = {"status": "success", "data": {"NFO_42": {
+        "live_price": 100, "top_bid_price": 99.9, "top_ask_price": 100.1
+    }}}
+
+    class SlowHttp(FakeHttp):
+        async def get(self, path, **kwargs):
+            await asyncio.sleep(0.01)
+            return await super().get(path, **kwargs)
+
+    async def scenario():
+        client = IndstocksClient()
+        client.http = SlowHttp(payload)
+        try:
+            await client.live_quote("42")
+        except RuntimeError as exc:
+            assert "exceeded stale threshold" in str(exc)
+        else:
+            raise AssertionError("slow quote response must be rejected")
         await client.close()
 
     asyncio.run(scenario())
