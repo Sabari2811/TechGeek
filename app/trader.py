@@ -142,9 +142,9 @@ async def run():
                     p.current_price = live_quote["ltp"]
                     p.quote_bid = live_quote.get("bid", 0.0)
                     p.quote_ask = live_quote.get("ask", 0.0)
-                    p.quote_age_seconds = 0.0
+                    p.quote_age_seconds = float(live_quote.get("response_latency_seconds", 0.0))
                     p.quote_source = live_quote.get("source", "full_quote")
-                    p.quote_stale = False
+                    p.quote_stale = p.quote_age_seconds > CONFIG.stale_seconds
                     record_audit_event("position_quote", {
                         "security_id": p.signal.security_id,
                         "symbol": p.signal.symbol,
@@ -160,7 +160,8 @@ async def run():
                         "ask": p.quote_ask,
                         "quote_source": p.quote_source,
                         "quote_age_seconds": p.quote_age_seconds,
-                        "quote_stale": False,
+                        "quote_freshness_basis": live_quote.get("freshness_basis", "unknown"),
+                        "quote_stale": p.quote_stale,
                     })
                 except Exception as exc:
                     # Never silently treat the old option-chain LTP as current.
