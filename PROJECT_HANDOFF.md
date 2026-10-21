@@ -78,3 +78,21 @@
 - Existing raw option-chain history remains insufficient to retroactively reproduce live five-level depth confirmation; no historical trades should be classified as strategy-valid unless matching depth/audit evidence exists.
 - No live token, market API, or order submission used. Live routing remains disabled. `data/instruments/fno.csv` and the five-level gate are unchanged.
 - CI pending for this branch head. Do not merge before all Python matrix jobs pass and the replay limitations are reviewed.
+
+
+## Confirmed-fill reconciliation follow-up — 2026-10-22
+
+- Follow-up branch: `fix/confirmed-fill-reconciliation`, based on merged main commit `c205c82c64ab289948bfe64c1032abfc777e269f`.
+- Added stable position identity (`position_opened_at`) and stop/target metadata to `entry_filled` and `exit_fill` audit events.
+- Added `reconcile_recorded_fills()` to the diagnostic replay. It uses recorded entry/exit fill prices and quantities rather than treating a quote-trigger as proof of an exit. Partial exits remain unresolved; gross P&L is computed only for the quantity with a recorded exit fill.
+- Distinguishes paper-mode simulated fills from recorded live fill events. Even LIVE event reconciliation does not query the broker and must be compared with broker order book/positions before accounting or restart recovery is considered complete.
+- Added tests for partial live exit, complete multi-fill live exit, and paper-mode classification.
+- This work does not recover positions from a restart, query broker truth, or change the microstructure gate. No live connection/order used; live routing remains disabled; `data/instruments/fno.csv` remains unchanged.
+- CI pending for this branch. Keep the PR draft until the full Python matrix passes and the output schema is reviewed.
+
+
+### PR #6 CI issue and fix — 2026-10-22
+
+- First PR #6 CI run failed with 3 failures in `tests/test_execution_replay.py`; 91 tests passed. The added fixtures joined JSON objects with the literal characters `\\n` rather than actual newline separators, so the JSONL loader correctly ignored the combined invalid line.
+- Fixed all three fixture writers to join with actual newline characters in commit `458b1d70853ad36f375487330efa56c958419d11`.
+- Rerun the full Python 3.11/3.12/3.14 CI matrix on the latest head before merge. Do not treat the earlier run as passing.
