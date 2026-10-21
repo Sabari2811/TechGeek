@@ -15,6 +15,9 @@ def test_order_intent_is_unresolved_until_terminal_event(tmp_path, monkeypatch):
     order_journal.record_order_event("entry-abc", "terminal_partial_fill", {
         "order_id": "123", "traded_quantity": 25
     })
+    # A terminal order with a fill can still represent an open position.
+    assert "entry-abc" in order_journal.unresolved_orders()
+    order_journal.mark_reconciled("entry-abc", "checked broker order book and positions")
     assert order_journal.unresolved_orders() == {}
 
 
