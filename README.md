@@ -175,3 +175,25 @@ reasons dominated.
 Raw capture is enabled by default in the live loop. Existing terminal output
 from a previous session cannot be reconstructed into option-chain history if the
 raw snapshots were not captured at that time.
+
+
+## Persistent entry kill switch
+
+The entry kill switch is stored in `.quantnifty/kill_switch.json` and survives process restarts. It blocks new entries in both PAPER and LIVE modes; it does not prevent exit attempts for an already tracked position. A corrupt or unreadable switch file fails closed (entries blocked). Unresolved broker-order states automatically enable the switch and require manual broker reconciliation.
+
+Run from the repository root:
+
+```powershell
+python -m app.kill_switch --status
+python -m app.kill_switch --on --reason "manual safety hold"
+python -m app.kill_switch --off --reason "reconciled and reviewed"
+```
+
+Only switch it off after verifying that there are no unknown/open broker orders or positions. This switch is an additional safety control, not a substitute for broker-side reconciliation. Keep live routing disabled during development and paper validation.
+
+## Local audit files
+
+- `.quantnifty/raw/YYYY-MM-DD.jsonl`: captured option-chain snapshots used by the existing signal replay.
+- `.quantnifty/audit/YYYY-MM-DD.jsonl`: signal rejections, raw provider depth payloads, five-level gate decisions, and confirmed entry/exit fill events.
+
+Audit files may contain market data and trade details; keep them local and do not commit them. Audit capture improves diagnosis but does not by itself make `backtest/replay.py` a realistic P&L backtester.
