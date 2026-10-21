@@ -1,6 +1,7 @@
 import asyncio
 import json
-from datetime import datetime
+from datetime import datetime, timezone
+import math
 import httpx
 import websockets
 from .config import CONFIG, IST
@@ -49,6 +50,7 @@ class IndstocksClient:
                 quote = _extract_live_quote(payload, sid)
                 if quote.get("ltp", 0.0) > 0:
                     quote["source"] = "full_quote"
+                    quote["received_at"] = datetime.now(timezone.utc).isoformat()
                     return quote
                 raise RuntimeError("full quote returned no live_price")
             except Exception as exc:
@@ -173,10 +175,25 @@ class IndstocksClient:
                   "page":1, "page_size":10}
         r = await self.http.get("/market/instruments/search", params=params)
         r.raise_for_status()
-        instruments = r.json().get("data", {}).get("instruments", [])
-        if not instruments:
+        payload = r.json()
+        data = payload.get("data", {}) if isinstance(payload, dict) else {}
+        instruments = data.get("instruments", []) if isinstance(data, dict) else []
+        if not isinstance(instruments, list) or not instruments:
             raise RuntimeError("Selected option contract was not found in instruments search")
-        return int(instruments[0].get("lot_size") or 0)
+
+        matches = [
+            row for row in instruments
+            if isinstance(row, dict) and _instrument_matches(row, expiry, strike, option_type)
+        ]
+        if len(matches) != 1:
+            raise RuntimeError(
+                "Could not uniquely verify exact option contract "
+                f"(expiry={expiry}, strike={strike}, type={option_type}); matches={len(matches)}"
+            )
+        lot_size = _num(matches[0], "lot_size", "lotSize")
+        if not math.isfinite(lot_size) or lot_size <= 0 or not lot_size.is_integer():
+            raise RuntimeError("Exact option contract returned an invalid lot size")
+        return int(lot_size)
 
     async def place_order(self, txn_type: str, security_id: str, qty: int, price: float, remarks: str):
         payload = {"txn_type":txn_type,"exchange":"NSE","segment":"DERIVATIVE","product":"INTRADAY",
@@ -222,6 +239,12 @@ def _extract_live_quote(data: dict, security_id: str) -> dict:
                 ltp = _num(item, "live_price", "ltp", "last_price", "lastPrice")
                 bid = _num(item, "top_bid_price", "bid_price", "bidPrice")
                 ask = _num(item, "top_ask_price", "ask_price", "askPrice")
+                if not math.isfinite(ltp) or ltp <= 0:
+                    return {}
+                if not math.isfinite(bid) or bid < 0 or not math.isfinite(ask) or ask < 0:
+                    return {}
+                if bid > 0 and ask > 0 and bid >= ask:
+                    return {}
                 return {"ltp": ltp, "bid": bid, "ask": ask}
 
     return {}
@@ -428,3 +451,43 @@ def load_chain_into_state(state: MarketState, data: dict, timestamp: datetime | 
                 _num(raw.get("greeks", {}) if isinstance(raw.get("greeks"), dict) else raw,"vega"),
                 int(_num(raw,"lot_size")) if _num(raw,"lot_size") > 0 else 1)
             state.options[state.key(strike, option_type)] = q
+
+
+
+def _normalized_expiry(value) -> str:
+    if value is None:
+        return ""
+    text = str(value).strip()
+    # Keep the date component only when the provider returns an ISO timestamp.
+    return text[:10] if len(text) >= 10 and text[4:5] == "-" else text
+
+
+def _first_value(row: dict, *names: str):
+    for name in names:
+        if row.get(name) is not None and str(row[name]).strip() != "":
+            return row[name]
+    return None
+
+
+def _instrument_matches(row: dict, expiry: str, strike: float, option_type: str) -> bool:
+    """Require exact identity fields; missing identity is not a match."""
+    row_expiry = _first_value(row, "expiry", "expiry_date", "expiryDate", "expiry_dt")
+    row_strike = _first_value(row, "strike", "strike_price", "strikePrice", "strike_price_value")
+    row_type = _first_value(row, "option_type", "optionType", "right", "instrument_option_type")
+    if row_expiry is None or row_strike is None or row_type is None:
+        return False
+    try:
+        parsed_strike = float(row_strike)
+    except (TypeError, ValueError):
+        return False
+    if not math.isfinite(parsed_strike) or abs(parsed_strike - float(strike)) > 1e-6:
+        return False
+    normalized_type = str(row_type).strip().upper()
+    if normalized_type in {"CALL", "C"}:
+        normalized_type = "CE"
+    elif normalized_type in {"PUT", "P"}:
+        normalized_type = "PE"
+    return (
+        _normalized_expiry(row_expiry) == _normalized_expiry(expiry)
+        and normalized_type == str(option_type).strip().upper()
+    )
