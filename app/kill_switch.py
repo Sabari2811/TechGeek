@@ -37,3 +37,24 @@ def set_enabled(enabled: bool, reason: str = "") -> None:
     temp_path = KILL_SWITCH_PATH.with_suffix(".tmp")
     temp_path.write_text(json.dumps(payload, separators=(",", ":")), encoding="utf-8")
     os.replace(temp_path, KILL_SWITCH_PATH)
+
+
+
+if __name__ == "__main__":
+    import argparse
+
+    parser = argparse.ArgumentParser(description="QuantNifty persistent entry kill switch")
+    action = parser.add_mutually_exclusive_group(required=True)
+    action.add_argument("--on", action="store_true", help="Block all new entries")
+    action.add_argument("--off", action="store_true", help="Allow entries if all other gates pass")
+    action.add_argument("--status", action="store_true", help="Print current persisted state")
+    parser.add_argument("--reason", default="", help="Operator reason for the state change")
+    args = parser.parse_args()
+
+    if args.on:
+        set_enabled(True, args.reason or "operator enabled")
+    elif args.off:
+        set_enabled(False, args.reason or "operator disabled")
+    enabled, reason = status()
+    print(f"ENTRY KILL SWITCH: {'ON — NEW ENTRIES BLOCKED' if enabled else 'OFF'}")
+    print(f"Reason: {reason}")
