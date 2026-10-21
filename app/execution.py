@@ -7,6 +7,7 @@ from .models import Position, TradeRecord, TradeSignal
 from .market import IndstocksClient
 from .kill_switch import status as kill_switch_status, set_enabled as set_kill_switch
 from .raw_data import record_audit_event
+from .order_journal import record_order_event
 
 
 class ExecutionEngine:
@@ -37,17 +38,33 @@ class ExecutionEngine:
     async def _live_order(self, txn_type: str, security_id: str, qty: int, price: float, tag: str):
         if qty <= 0:
             raise ValueError("Order quantity must be positive")
-        response = await self.client.place_order(txn_type, security_id, qty, price, tag)
+        # Persist intent before the network request. If the process crashes or
+        # the request times out after the broker accepted it, startup recovery
+        # will see an unresolved intent and block entries pending reconciliation.
+        record_order_event(tag, "intent", {
+            "transaction": txn_type, "security_id": str(security_id),
+            "requested_quantity": qty, "limit_price": price,
+        })
+        try:
+            response = await self.client.place_order(txn_type, security_id, qty, price, tag)
+        except Exception as exc:
+            record_order_event(tag, "submission_uncertain", {"error": str(exc)})
+            set_kill_switch(True, f"uncertain broker submission for {tag}")
+            raise RuntimeError(
+                f"Broker submission outcome uncertain for {tag}; entry kill switch enabled"
+            ) from exc
         data = response.get("data", {}) if isinstance(response, dict) else {}
         status = str(data.get("order_status") or "").strip().upper()
         accepted = {"SUCCESS", "INITIATED", "PENDING", "PROCESSING", "QUEUED", "PARTIALLY FILLED"}
         if status not in accepted:
+            record_order_event(tag, "terminal_no_fill", {"response_status": status})
             raise RuntimeError(f"Order rejected: {response}")
         order_id = data.get("order_id")
         if not order_id:
             set_kill_switch(True, "broker accepted an order without returning an order ID")
             raise RuntimeError("Broker accepted order but returned no order_id; entry kill switch enabled")
         order_id = str(order_id)
+        record_order_event(tag, "broker_order_id_received", {"order_id": order_id, "response_status": status})
 
         terminal = {
             "SUCCESS", "CANCELLED", "FAILED", "ABORTED", "EXPIRED",
@@ -55,13 +72,29 @@ class ExecutionEngine:
         }
         latest = None
         for attempt in range(10):
-            latest = await self._find_order(order_id)
+            try:
+                latest = await self._find_order(order_id)
+            except Exception as exc:
+                record_order_event(tag, "reconciliation_error", {
+                    "order_id": order_id, "error": str(exc), "attempt": attempt + 1,
+                })
+                set_kill_switch(True, f"order-book reconciliation failed for {order_id}")
+                raise RuntimeError(
+                    f"Cannot reconcile broker order {order_id}; entry kill switch enabled"
+                ) from exc
             if latest:
                 latest_status = self._order_status(latest)
                 traded_qty = self._traded_quantity(latest)
                 if latest_status in terminal:
                     if traded_qty > 0:
+                        event = "terminal_filled" if traded_qty >= qty else "terminal_partial_fill"
+                        record_order_event(tag, event, {
+                            "order_id": order_id, "status": latest_status,
+                            "traded_quantity": traded_qty,
+                            "traded_price": latest.get("traded_price"),
+                        })
                         return latest
+                    record_order_event(tag, "terminal_no_fill", {"order_id": order_id, "status": latest_status})
                     raise RuntimeError(f"Order finished without a fill: {latest_status}")
                 # SUCCESS is terminal in some provider responses, but only
                 # the order-book record is trusted for traded quantity.
@@ -70,7 +103,14 @@ class ExecutionEngine:
         # Cancel the unfilled remainder, then reconcile again. A cancel request
         # is not itself proof that the order is terminal or that no more fills
         # can arrive.
-        latest = await self._find_order(order_id)
+        try:
+            latest = await self._find_order(order_id)
+        except Exception as exc:
+            record_order_event(tag, "reconciliation_error", {"order_id": order_id, "error": str(exc)})
+            set_kill_switch(True, f"order-book reconciliation failed for {order_id}")
+            raise RuntimeError(
+                f"Cannot reconcile broker order {order_id} before cancellation; entry kill switch enabled"
+            ) from exc
         if latest and self._order_status(latest) not in terminal:
             try:
                 await self.client.cancel_order(order_id)
@@ -81,11 +121,28 @@ class ExecutionEngine:
                     f"(order_id={order_id}): {exc}"
                 ) from exc
 
-        for _ in range(4):
-            latest = await self._find_order(order_id)
+        for attempt in range(4):
+            try:
+                latest = await self._find_order(order_id)
+            except Exception as exc:
+                record_order_event(tag, "reconciliation_error", {
+                    "order_id": order_id, "error": str(exc), "after_cancel_attempt": attempt + 1,
+                })
+                set_kill_switch(True, f"order-book reconciliation failed for {order_id} after cancel")
+                raise RuntimeError(
+                    f"Cannot confirm order {order_id} after cancellation; entry kill switch enabled"
+                ) from exc
             if latest and self._order_status(latest) in terminal:
-                if self._traded_quantity(latest) > 0:
+                traded_qty = self._traded_quantity(latest)
+                if traded_qty > 0:
+                    event = "terminal_filled" if traded_qty >= qty else "terminal_partial_fill"
+                    record_order_event(tag, event, {
+                        "order_id": order_id, "status": self._order_status(latest),
+                        "traded_quantity": traded_qty,
+                        "traded_price": latest.get("traded_price"),
+                    })
                     return latest
+                record_order_event(tag, "terminal_no_fill", {"order_id": order_id, "status": self._order_status(latest)})
                 raise RuntimeError(f"Order finished without a fill: {self._order_status(latest)}")
             await asyncio.sleep(0.25)
 
