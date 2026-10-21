@@ -9,7 +9,7 @@ from .risk import RiskManager, calculate_stop_target
 from .execution import ExecutionEngine
 from .learning import IncrementalLearner
 from .session_state import load_today, load_today_trades, save_today
-from .raw_data import record_option_chain
+from .raw_data import record_option_chain, record_audit_event
 from .terminal import Terminal
 
 
@@ -194,6 +194,19 @@ async def run():
             audit = SignalAudit()
             signal = QuantEngine.best_signal(state, CONFIG.min_net_ev, learner=learning, audit=audit)
             if not signal:
+                record_audit_event("signal_rejected", {
+                    "spot": state.spot,
+                    "expiry": state.expiry,
+                    "blocking_reason": audit.blocking_reason,
+                    "phase": audit.phase,
+                    "direction": audit.phase_direction,
+                    "evaluated": audit.evaluated,
+                    "eligible_before_min_ev": audit.eligible_before_min_ev,
+                    "final_candidates": audit.final_candidates,
+                    "rejected": audit.rejected,
+                    "best_rejected_symbol": audit.best_rejected_symbol,
+                    "best_rejected_net_ev": audit.best_rejected_net_ev,
+                })
                 Terminal.set_trade_state(execution.position, execution.closed_trades, len(execution.closed_trades) + (1 if execution.position else 0))
                 Terminal.waiting_audit(state.spot, audit, CONFIG.min_net_ev)
                 await asyncio.sleep(CONFIG.poll_seconds)
@@ -224,6 +237,16 @@ async def run():
             except Exception as exc:
                 confirmed, micro_reason = False, f"depth feed unavailable: {exc}"
 
+            record_audit_event("microstructure_check", {
+                "security_id": q.security_id,
+                "strike": q.strike,
+                "option_type": q.option_type,
+                "provider_payload": depth_data if "depth_data" in locals() else {},
+                "normalized_depth": raw_depth if "raw_depth" in locals() else {},
+                "confirmed": confirmed,
+                "reason": micro_reason,
+                "depth_diagnostic": depth_diag,
+            })
             audit.microstructure_evaluated += 1
             audit.microstructure_last_reason = micro_reason
             if confirmed:
