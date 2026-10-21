@@ -76,5 +76,6 @@
 - Added `tests/test_market_data_integrity.py` for malformed quote prices, crossed/locked markets, exact contract matching, missing identity fields, and ambiguous results.
 - `.github/workflows/tests.yml`: updated checkout/setup-python actions to Node 24 compatible versions and pinned the runner to Ubuntu 24.04 to avoid the reported Node 20 and ubuntu-latest migration warnings. CI must verify the action versions and Python matrix.
 - This branch does not modify `data/instruments/fno.csv`, weaken the five-level gate, use a live API token, or enable real order routing.
-- Remaining known issues: source/provider timestamp freshness still needs provider schema evidence; square-off can still use unsafe fallback prices when the quote is stale; open-position reconstruction after restart remains manual; replay is not yet a realistic fill/P&L simulator.
-- Validation: pending GitHub Actions for this branch. Do not merge until the current head is green.
+- Square-off safety: `app/trader.py` no longer falls back to stale option-chain bid or LTP for session square-off. It requires a fresh positive bid; otherwise it trips the entry kill switch, records an audit event, and leaves the position open for operator reconciliation. Added unit tests for this rule. This intentionally prefers not to submit an ungrounded sell price; it does not guarantee the position can be closed when the feed is unavailable.
+- Remaining known issues: source/provider timestamp freshness still needs provider schema evidence; open-position reconstruction after restart remains manual; replay is not yet a realistic fill/P&L simulator.
+- Validation: GitHub Actions must pass for the current head after square-off safety changes. Do not merge while checks are pending or failing.
