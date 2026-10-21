@@ -5,11 +5,11 @@ from .models import MarketState, SignalAudit
 from .market import IndstocksClient, load_chain_into_state, extract_market_depth, summarize_market_depth_payload
 from .math_engine import QuantEngine
 from .microstructure import MicrostructureEngine, MicrostructureState
-from .risk import RiskManager
+from .risk import RiskManager, calculate_stop_target
 from .execution import ExecutionEngine
 from .learning import IncrementalLearner
 from .session_state import load_today, load_today_trades, save_today
-from .raw_data import record_option_chain
+from .raw_data import record_option_chain, record_audit_event
 from .terminal import Terminal
 
 
@@ -126,6 +126,13 @@ async def run():
                     exit_price = p.quote_bid if p.quote_bid > 0 else live_ltp
                     if live_ltp <= p.signal.stop:
                         closed = await execution.exit(exit_price, "STOP LOSS")
+                        if closed is None:
+                            Terminal.waiting(
+                                state.spot,
+                                f"Partial stop exit fill; {execution.position.quantity} units remain open.",
+                            )
+                            await asyncio.sleep(CONFIG.poll_seconds)
+                            continue
                         risk.record_trade(closed.realized_pnl)
                         learning.record(p.signal, closed.realized_pnl)
                         save_today(state.spot_history, today, execution.closed_trades)
@@ -135,6 +142,13 @@ async def run():
                         continue
                     if live_ltp >= p.signal.target:
                         closed = await execution.exit(exit_price, "TARGET")
+                        if closed is None:
+                            Terminal.waiting(
+                                state.spot,
+                                f"Partial target exit fill; {execution.position.quantity} units remain open.",
+                            )
+                            await asyncio.sleep(CONFIG.poll_seconds)
+                            continue
                         risk.record_trade(closed.realized_pnl)
                         learning.record(p.signal, closed.realized_pnl)
                         save_today(state.spot_history, today, execution.closed_trades)
@@ -151,6 +165,13 @@ async def run():
                     else:
                         price = p.current_price
                     closed = await execution.exit(price, "SESSION SQUARE-OFF")
+                    if closed is None:
+                        Terminal.waiting(
+                            state.spot,
+                            f"Partial square-off fill; {execution.position.quantity} units remain open.",
+                        )
+                        await asyncio.sleep(CONFIG.poll_seconds)
+                        continue
                     risk.record_trade(closed.realized_pnl)
                     learning.record(p.signal, closed.realized_pnl)
                     save_today(state.spot_history, today, execution.closed_trades)
@@ -173,6 +194,19 @@ async def run():
             audit = SignalAudit()
             signal = QuantEngine.best_signal(state, CONFIG.min_net_ev, learner=learning, audit=audit)
             if not signal:
+                record_audit_event("signal_rejected", {
+                    "spot": state.spot,
+                    "expiry": state.expiry,
+                    "blocking_reason": audit.blocking_reason,
+                    "phase": audit.phase,
+                    "direction": audit.phase_direction,
+                    "evaluated": audit.evaluated,
+                    "eligible_before_min_ev": audit.eligible_before_min_ev,
+                    "final_candidates": audit.final_candidates,
+                    "rejected": audit.rejected,
+                    "best_rejected_symbol": audit.best_rejected_symbol,
+                    "best_rejected_net_ev": audit.best_rejected_net_ev,
+                })
                 Terminal.set_trade_state(execution.position, execution.closed_trades, len(execution.closed_trades) + (1 if execution.position else 0))
                 Terminal.waiting_audit(state.spot, audit, CONFIG.min_net_ev)
                 await asyncio.sleep(CONFIG.poll_seconds)
@@ -187,6 +221,8 @@ async def run():
                 continue
 
             depth_diag = ""
+            depth_data = {}
+            raw_depth = {}
             try:
                 # market_depth() owns the documented REST/full-quote/WebSocket
                 # fallback chain. Do not issue a second duplicate fallback here.
@@ -203,6 +239,16 @@ async def run():
             except Exception as exc:
                 confirmed, micro_reason = False, f"depth feed unavailable: {exc}"
 
+            record_audit_event("microstructure_check", {
+                "security_id": q.security_id,
+                "strike": q.strike,
+                "option_type": q.option_type,
+                "provider_payload": depth_data,
+                "normalized_depth": raw_depth,
+                "confirmed": confirmed,
+                "reason": micro_reason,
+                "depth_diagnostic": depth_diag,
+            })
             audit.microstructure_evaluated += 1
             audit.microstructure_last_reason = micro_reason
             if confirmed:
@@ -225,8 +271,12 @@ async def run():
                 continue
 
             signal.entry = q.ask
-            signal.stop = max(q.ltp * 0.75, q.ltp - state.spot * 0.001)
-            signal.target = q.ltp + (q.ltp - signal.stop) * 1.8
+            try:
+                signal.stop, signal.target = calculate_stop_target(signal.entry, state.spot)
+            except ValueError as exc:
+                Terminal.waiting(state.spot, f"Candidate rejected: invalid entry/stop/target levels ({exc})", checks)
+                await asyncio.sleep(CONFIG.poll_seconds)
+                continue
             signal.reason += f" | depth={micro_reason}"
 
             lot_size = await client.contract_lot_size(expiry, signal.strike, signal.option_type)

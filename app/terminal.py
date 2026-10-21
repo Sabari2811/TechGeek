@@ -2,6 +2,7 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 from .config import CONFIG
 from .models import Position, TradeRecord
+from .kill_switch import status as kill_switch_status
 
 
 IST = ZoneInfo("Asia/Kolkata")
@@ -68,6 +69,12 @@ class Terminal:
         print("╔══════════════════════════════════════════════════════╗")
         print(f"║              {Terminal._paint(f'QUANTNIFTY | {mode:<12}', BOLD + CYAN)}             ║")
         print("╠══════════════════════════════════════════════════════╣")
+        kill_enabled, kill_reason = kill_switch_status()
+        switch_label = "ON — NEW ENTRIES BLOCKED" if kill_enabled else "OFF"
+        switch_color = RED if kill_enabled else GREEN
+        print(f"║ ENTRY KILL SWITCH: {Terminal._paint(switch_label, switch_color)}")
+        if kill_enabled and kill_reason:
+            print(f"║ Reason: {kill_reason[:44]}")
         if spot:
             print(f"║ TIME     {now} IST     NIFTY     {spot:,.2f}          ║")
         else:

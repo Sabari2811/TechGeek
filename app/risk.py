@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+import math
 from datetime import datetime
 from .config import CONFIG
 from .models import MarketState, TradeSignal
@@ -9,6 +10,27 @@ class RiskState:
     realized_pnl: float = 0.0
     halted: bool = False
     halt_reason: str = ""
+
+
+def calculate_stop_target(entry_price: float, spot_price: float, reward_risk: float = 1.8) -> tuple[float, float]:
+    """Calculate option stop/target from the executable entry price.
+
+    The stop-distance policy retains the existing formula, but uses entry
+    rather than last-traded price so risk sizing and the target use the same
+    price basis as the proposed trade.
+    """
+    values = (entry_price, spot_price, reward_risk)
+    if not all(
+        isinstance(value, (int, float)) and math.isfinite(value) and value > 0
+        for value in values
+    ):
+        raise ValueError("entry price, spot price, and reward/risk must be positive")
+    stop = max(entry_price * 0.75, entry_price - spot_price * 0.001)
+    if stop <= 0 or stop >= entry_price:
+        raise ValueError("calculated stop must be positive and below entry")
+    target = entry_price + (entry_price - stop) * reward_risk
+    return stop, target
+
 
 class RiskManager:
     def __init__(self):

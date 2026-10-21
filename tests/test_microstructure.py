@@ -63,3 +63,35 @@ def test_live_confirmation_requires_all_five_levels():
     assert MicrostructureEngine.from_depth(
         "NFO_1", payload, state, require_levels=5
     ) is None
+
+
+
+def test_zero_quantity_levels_do_not_count_as_liquidity():
+    state = MicrostructureState()
+    payload = make_depth()
+    for row in payload["market_depth"]["depth"]:
+        row["buy"]["quantity"] = 0
+        row["sell"]["quantity"] = 0
+    assert MicrostructureEngine.from_depth("NFO_1", payload, state) is None
+
+
+def test_live_gate_rejects_five_prices_with_empty_sizes():
+    state = MicrostructureState()
+    payload = make_depth()
+    payload["market_depth"]["depth"] = [
+        {
+            "buy": {"price": 100.0 - i * 0.05, "quantity": 100 if i == 0 else 0},
+            "sell": {"price": 100.1 + i * 0.05, "quantity": 120 if i == 0 else 0},
+        }
+        for i in range(5)
+    ]
+    assert MicrostructureEngine.from_depth(
+        "NFO_1", payload, state, require_levels=5
+    ) is None
+
+
+def test_crossed_top_of_book_is_rejected():
+    state = MicrostructureState()
+    assert MicrostructureEngine.from_depth(
+        "NFO_1", make_depth(bid=100.2, ask=100.1), state
+    ) is None
