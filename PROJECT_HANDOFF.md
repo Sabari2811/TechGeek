@@ -19,34 +19,36 @@
 - Added `calculate_stop_target` in `app/risk.py`; the stop and target are now derived from the executable entry ask, keeping position sizing and reward/risk calculations on the same price basis. Invalid/non-finite inputs are rejected.
 - Added `tests/test_risk_levels.py` to cover stop/target calculation and invalid inputs.
 - Added `tests/test_execution_partial_fills.py` for partial-exit accounting and duplicate-entry rejection. Tests use simulated broker responses and do not place orders.
+- Hardened `app/microstructure.py`: zero/negative-size levels no longer count as liquidity, and locked/crossed best bid/ask snapshots are rejected. The five-level live requirement remains unchanged; regression tests were added.
+- Added `app/kill_switch.py`, a persistent fail-closed entry kill switch. The missing file means OFF; corrupt/unreadable state means ON. `ExecutionEngine.enter` enforces it before any broker call, the terminal monitor displays status, and unresolved order state trips it. Operator controls: `python -m app.kill_switch --on --reason "reason"`, `python -m app.kill_switch --off --reason "reviewed"`, or `python -m app.kill_switch --status`.
+- Added separate `.quantnifty/audit/YYYY-MM-DD.jsonl` capture for signal rejections, microstructure payloads/gate outcomes, and confirmed entry/exit fills. It is separate from chain replay files so chain loaders do not confuse audit events for market snapshots. Added tests for JSON-safe audit capture.
 
 ## Validation status
-- Repository source edits were committed on the working branch; the branch head must be checked before further edits.
-- GitHub Actions run 39651877542 passed compile and test steps on Python 3.11, 3.12, and 3.14 for the earlier execution-reconciliation commit.
-- Additional stop/target changes and tests were pushed after that run; their latest CI run must still be checked.
+- Branch head must be checked before further edits; current recent commit is `57a175e7817fc21e88ef2dbc4a57912d87b50142` before any subsequent documentation updates.
+- GitHub Actions run 39651877542 passed compile and test steps on Python 3.11, 3.12, and 3.14 for an earlier revision. No workflow run was returned for the most recent kill-switch/audit commits at the last check; latest CI is therefore **not yet confirmed**.
+- Automated tests have not been executed in the user's Windows-local runtime.
 - Automated tests have **not been executed in the user's Windows-local runtime** in this work session.
 - No deployment or production validation has been performed.
 - No API token was requested or used.
 - These changes must not be described as production-ready until automated tests and review are complete.
 
 ## Known remaining risks / pending items
-1. **Unresolved order state:** if cancellation fails or the broker never reports a terminal state, the order may have fills that cannot be fully reconciled by this process. A durable broker-order reconciliation and entry-block/kill-switch policy is still required before any live routing.
-2. **Stop/target consistency:** entry uses ask price while stop/target are currently calculated from LTP. Derive risk levels consistently from executable entry and add tests.
-3. **Stale square-off quotes:** define and test safe behaviour when session square-off arrives without a fresh bid/ask quote.
-4. **Raw data capture:** option-chain snapshots are recorded, but the complete depth payload, decision-by-decision gate outcomes, and execution events are not yet captured in a unified replayable audit stream.
-5. **Market-data validation:** verify timestamp freshness, contract identity, numeric sanity, and meaningful (positive-quantity) five-level depth.
-6. **Contract lot-size matching:** validate the exact instrument/expiry/strike/type and returned security ID before accepting a lot size.
-7. **Replay correctness:** implement realistic bid/ask fills, partial fills, stop/target/session exits, fees/slippage, and exact rejection-reason attribution. Current replay is signal-level rather than a full execution simulation.
-8. **Risk and kill switch:** test limits across restarts, partial fills, duplicate signals, and unresolved order state. Confirm persistent kill-switch enforcement before any live use.
-9. **Learning / walk-forward validation:** verify outcome idempotency and use chronological out-of-sample evaluation with no look-ahead leakage.
-10. **Operational health:** make health reporting distinguish process availability from market-feed freshness and trader-task health.
-11. **Project documentation:** continue updating this handoff after each change with commit SHA, test/CI results, deployment status, issues, and next task.
+1. **Unresolved order state:** a broker order with no returned ID or an unconfirmed terminal state trips the persistent entry kill switch. This prevents new entries but does not itself discover or flatten an unknown broker-side position. Manual broker reconciliation is still mandatory; durable order journal/recovery is still required before live routing.
+2. **Stale square-off quotes:** stop/target monitoring blocks price-triggered exits when the dedicated live quote call fails, but session square-off still has fallback paths using chain bid/current price. Define and test a fail-safe square-off workflow without pretending stale prices are executable.
+3. **Market-data timestamps:** provider/source timestamps are not yet validated end-to-end. Local receive time must not be mistaken for provider event time.
+4. **Contract lot-size matching:** the endpoint is queried with expiry/strike/type filters, but returned rows are not yet independently matched against exact contract identity/security ID. Provider schema needs fixture/response confirmation.
+5. **Replay correctness:** `backtest/replay.py` is signal-level, not a full execution simulation. It does not model realistic bid/ask fills, partial fills, stop/target/session exits, fees/slippage, or exact counterfactual trade outcomes. Audit events now capture more evidence but do not replace depth history or full replay.
+6. **Learning / walk-forward validation:** verify outcome idempotency and use chronological out-of-sample evaluation with no look-ahead leakage.
+7. **Operational health:** health endpoint still reports process availability only; market-feed freshness and trader-task health need separate indicators.
+8. **Execution durability:** position and order state are still in memory; restart recovery for open broker positions is intentionally not guessed. A durable order journal/reconciliation procedure remains required.
+9. **Final validation:** rerun latest CI, review full PR diff, and run the suite in the user's Windows environment if needed. No deployment or production validation has been performed.
 
 ## Required next workflow
 1. Inspect current branch head and diff.
 2. Verify CI for the latest branch head, not only the earlier commit.
-3. Add regression tests for unresolved order states and entry partial fills; decide a safe durable reconciliation/kill-switch policy before live routing.
-4. Improve depth/raw capture and data validation.
-5. Improve historical replay and post-market P&L reconciliation.
-6. Run full CI and review the complete diff before merging.
-7. Keep live order routing disabled throughout.
+3. Add regression coverage for unresolved broker states, partial entry fills, and recovery; kill switch now trips on key unknown-order paths.
+4. Add exact contract identity checks and provider timestamp/freshness validation once the response schema is confirmed.
+5. Build deterministic replay with explicit fill/slippage/fee assumptions and counterfactual candidate attribution; do not present chain-only replay as execution P&L.
+6. Improve operational health reporting and learning idempotency/walk-forward validation.
+7. Run full CI and review the complete diff before merging.
+8. Keep live order routing disabled throughout.
