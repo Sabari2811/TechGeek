@@ -119,5 +119,13 @@
 - Added `read_only_broker_order_reconciliation()` to compare unresolved local journal order IDs with a caller-supplied broker order-book snapshot from the existing client method.
 - Report is strictly read-only: no submit/cancel calls, no journal auto-reconciliation, and no kill-switch clearing. Missing/ambiguous order IDs and corrupt/unreadable journals fail closed for manual review.
 - An order-book match is not proof the account is flat. Broker positions are not queried because a verified provider positions endpoint/schema is not established in this repository. Manual position confirmation remains mandatory.
-- Added tests for partial-fill matching, missing/ambiguous order IDs, corrupt journal, and input validation. CI pending on branch `feat/read-only-order-reconciliation`.
+- Added tests for partial-fill matching, missing/ambiguous order IDs, corrupt journal, and input validation. PR #8 merged to main as `cb9c3dd9383ff1153950b1c74187812d46d3e031` after all Python 3.11/3.12/3.14 jobs passed in run `39663185063`.
 - No live token/API connection/orders used; live routing remains disabled; the five-level microstructure gate and `data/instruments/fno.csv` are unchanged.
+
+
+## Latest verification — 2026-10-22
+
+- PR #8 merged to main after Python 3.11, 3.12 and 3.14 CI passed: run `39663185063`.
+- Read-only order-book reconciliation reports local journal/order-book matches but intentionally does not reconcile the account's position inventory or clear the kill switch.
+- The latest merged code still needs post-merge CI validation; check the newest main run before further merge actions.
+- Remaining work is not safe to call complete: provider event timestamp schema and account positions API schema are unverified. Do not invent either endpoint or enable live routing. Restart recovery must remain fail-closed until verified broker order AND position reconciliation is available.
