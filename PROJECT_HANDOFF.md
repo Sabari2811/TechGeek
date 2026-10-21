@@ -88,11 +88,11 @@
 - Distinguishes paper-mode simulated fills from recorded live fill events. Even LIVE event reconciliation does not query the broker and must be compared with broker order book/positions before accounting or restart recovery is considered complete.
 - Added tests for partial live exit, complete multi-fill live exit, and paper-mode classification.
 - This work does not recover positions from a restart, query broker truth, or change the microstructure gate. No live connection/order used; live routing remains disabled; `data/instruments/fno.csv` remains unchanged.
-- CI pending for this branch. Keep the PR draft until the full Python matrix passes and the output schema is reviewed.
+- PR #6 was merged to main as commit `594ea1f6d13fa51ddcacd6ab36565936638145aa` after all Python 3.11/3.12/3.14 matrix jobs passed on the final PR head (`080b2d4f3aec1eabf5101e0c715b9abadc6b54b5`). Post-merge main CI run `39662361715` was queued at the time this note was written.
 
 
 ### PR #6 CI issue and fix — 2026-10-22
 
 - First PR #6 CI run failed with 3 failures in `tests/test_execution_replay.py`; 91 tests passed. The added fixtures joined JSON objects with the literal characters `\\n` rather than actual newline separators, so the JSONL loader correctly ignored the combined invalid line.
 - Fixed all three fixture writers to join with actual newline characters in commit `458b1d70853ad36f375487330efa56c958419d11`.
-- Rerun the full Python 3.11/3.12/3.14 CI matrix on the latest head before merge. Do not treat the earlier run as passing.
+- The corrected final PR head passed all three Python 3.11/3.12/3.14 CI jobs in run `39662099853`; the post-merge main workflow is tracked separately.
