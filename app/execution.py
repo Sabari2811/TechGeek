@@ -5,6 +5,7 @@ from datetime import datetime
 from .config import CONFIG
 from .models import Position, TradeRecord, TradeSignal
 from .market import IndstocksClient
+from .kill_switch import status as kill_switch_status
 
 
 class ExecutionEngine:
@@ -92,6 +93,9 @@ class ExecutionEngine:
         )
 
     async def enter(self, signal: TradeSignal, quantity: int) -> Position:
+        kill_enabled, kill_reason = kill_switch_status()
+        if kill_enabled:
+            raise RuntimeError(f"Entry blocked by persistent kill switch: {kill_reason}")
         if self.position is not None:
             raise RuntimeError("Cannot enter: a position is already open")
         if quantity <= 0:
