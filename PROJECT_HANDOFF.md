@@ -112,3 +112,12 @@
 - PR #4 is closed as superseded by PR #7 to avoid keeping a conflicting duplicate open.
 - Live routing remains disabled. The provider's event-time schema is not verified, so the recorded quote receive time is not proof of market-event freshness.
 - Important remaining safety limitation: startup deliberately blocks on unresolved order journal entries, but open broker positions are not automatically reconstructed or flattened. No broker positions endpoint has been verified in this repo; do not invent one. Next work should add a read-only reconciliation report only against documented/verified broker responses, and keep manual position confirmation required.
+
+
+## Read-only broker order reconciliation report — 2026-10-22
+
+- Added `read_only_broker_order_reconciliation()` to compare unresolved local journal order IDs with a caller-supplied broker order-book snapshot from the existing client method.
+- Report is strictly read-only: no submit/cancel calls, no journal auto-reconciliation, and no kill-switch clearing. Missing/ambiguous order IDs and corrupt/unreadable journals fail closed for manual review.
+- An order-book match is not proof the account is flat. Broker positions are not queried because a verified provider positions endpoint/schema is not established in this repository. Manual position confirmation remains mandatory.
+- Added tests for partial-fill matching, missing/ambiguous order IDs, corrupt journal, and input validation. CI pending on branch `feat/read-only-order-reconciliation`.
+- No live token/API connection/orders used; live routing remains disabled; the five-level microstructure gate and `data/instruments/fno.csv` are unchanged.

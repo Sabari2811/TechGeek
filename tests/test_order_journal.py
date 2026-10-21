@@ -54,3 +54,51 @@ def test_reconciliation_requires_reason(tmp_path, monkeypatch):
     import pytest
     with pytest.raises(ValueError, match="reason is required"):
         order_journal.mark_reconciled("unknown-ref", "")
+
+
+
+def test_read_only_broker_reconciliation_matches_order_without_clearing_journal(tmp_path, monkeypatch):
+    monkeypatch.setattr(order_journal, "JOURNAL_ROOT", tmp_path)
+    order_journal.record_order_event("entry-1", "intent", {"requested_quantity": 10})
+    order_journal.record_order_event("entry-1", "broker_order_id_received", {"order_id": "123"})
+    order_journal.record_order_event("entry-1", "terminal_partial_fill", {
+        "order_id": "123", "traded_quantity": 4
+    })
+
+    report = order_journal.read_only_broker_order_reconciliation([
+        {"id": "123", "status": "CANCELLED", "traded_qty": 4}
+    ])
+    assert report["read_only"] is True
+    assert report["broker_positions_checked"] is False
+    assert report["orders"][0]["status"] == "MATCHED_ORDER_ONLY_MANUAL_POSITION_CHECK_REQUIRED"
+    assert report["orders"][0]["broker_traded_quantity"] == 4
+    assert "entry-1" in order_journal.unresolved_orders()
+
+
+def test_read_only_broker_reconciliation_flags_missing_or_ambiguous_order_ids(tmp_path, monkeypatch):
+    monkeypatch.setattr(order_journal, "JOURNAL_ROOT", tmp_path)
+    order_journal.record_order_event("entry-1", "intent", {"requested_quantity": 10})
+    order_journal.record_order_event("entry-1", "broker_order_id_received", {"order_id": "123"})
+
+    missing = order_journal.read_only_broker_order_reconciliation([])
+    assert missing["orders"][0]["reason"] == "broker_order_missing_or_ambiguous"
+
+    ambiguous = order_journal.read_only_broker_order_reconciliation([
+        {"id": "123", "status": "FILLED", "traded_qty": 10},
+        {"id": "123", "status": "FILLED", "traded_qty": 10},
+    ])
+    assert ambiguous["orders"][0]["broker_match_count"] == 2
+
+
+def test_read_only_broker_reconciliation_fails_closed_on_corrupt_journal(tmp_path, monkeypatch):
+    monkeypatch.setattr(order_journal, "JOURNAL_ROOT", tmp_path)
+    (tmp_path / "2026-10-22.jsonl").write_text("{broken\\n", encoding="utf-8")
+    report = order_journal.read_only_broker_order_reconciliation([])
+    assert report["status"] == "BLOCKED"
+    assert report["reason"] == "journal_corrupt"
+
+
+def test_read_only_broker_reconciliation_requires_list():
+    import pytest
+    with pytest.raises(TypeError, match="broker_orders must be a list"):
+        order_journal.read_only_broker_order_reconciliation({})

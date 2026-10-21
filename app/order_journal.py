@@ -86,3 +86,96 @@ if __name__ == "__main__":
     args = parser.parse_args()
     mark_reconciled(args.reconcile, args.reason)
     print(f"Recorded reconciliation for {args.reconcile}.")
+
+
+
+def read_only_broker_order_reconciliation(broker_orders, root: Path | None = None) -> dict:
+    """Compare journaled order IDs with a supplied broker order-book snapshot.
+
+    This function is intentionally read-only: it never marks journal entries
+    reconciled, never submits/cancels orders, and cannot establish whether the
+    account has an open position. Callers must supply an order-book response
+    already obtained through the existing, documented client method.
+    """
+    if not isinstance(broker_orders, list):
+        raise TypeError("broker_orders must be a list returned by the broker order-book client")
+
+    latest_by_ref: dict[str, dict] = {}
+    root = root or JOURNAL_ROOT
+    if root.exists():
+        for path in sorted(root.glob("*.jsonl")):
+            try:
+                lines = path.read_text(encoding="utf-8").splitlines()
+            except OSError as exc:
+                return {"status": "BLOCKED", "reason": "journal_unreadable", "path": str(path), "error": str(exc), "orders": []}
+            for line_number, line in enumerate(lines, 1):
+                try:
+                    row = json.loads(line)
+                    ref = str(row["client_order_ref"])
+                    event = str(row["event"])
+                    details = row.get("details", {})
+                    if not isinstance(details, dict):
+                        raise ValueError("details must be an object")
+                except (json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
+                    return {"status": "BLOCKED", "reason": "journal_corrupt", "path": str(path), "line": line_number, "error": str(exc), "orders": []}
+                latest_by_ref[ref] = row
+
+    broker_by_id: dict[str, list[dict]] = {}
+    for order in broker_orders:
+        if not isinstance(order, dict):
+            continue
+        order_id = order.get("id") or order.get("order_id")
+        if order_id is not None and str(order_id).strip():
+            broker_by_id.setdefault(str(order_id), []).append(order)
+
+    results = []
+    for ref, row in latest_by_ref.items():
+        if row.get("event") in {"reconciled", "terminal_no_fill"}:
+            continue
+        details = row.get("details", {})
+        order_id = details.get("order_id")
+        if not order_id:
+            results.append({
+                "client_order_ref": ref,
+                "journal_event": row.get("event"),
+                "status": "MANUAL_REVIEW_REQUIRED",
+                "reason": "journal_has_no_broker_order_id",
+            })
+            continue
+        matches = broker_by_id.get(str(order_id), [])
+        if len(matches) != 1:
+            results.append({
+                "client_order_ref": ref,
+                "order_id": str(order_id),
+                "journal_event": row.get("event"),
+                "status": "MANUAL_REVIEW_REQUIRED",
+                "reason": "broker_order_missing_or_ambiguous",
+                "broker_match_count": len(matches),
+            })
+            continue
+        broker = matches[0]
+        results.append({
+            "client_order_ref": ref,
+            "order_id": str(order_id),
+            "journal_event": row.get("event"),
+            "broker_status": str(broker.get("status") or broker.get("order_status") or "").strip().upper(),
+            "broker_traded_quantity": _safe_nonnegative_int(broker.get("traded_qty", broker.get("filled_quantity", 0))),
+            "journal_traded_quantity": _safe_nonnegative_int(details.get("traded_quantity", details.get("filled_quantity", 0))),
+            "status": "MATCHED_ORDER_ONLY_MANUAL_POSITION_CHECK_REQUIRED",
+        })
+
+    return {
+        "status": "REVIEW_REQUIRED" if results else "NO_UNRESOLVED_JOURNAL_ORDERS",
+        "read_only": True,
+        "broker_positions_checked": False,
+        "orders": results,
+        "warning": "Order-book matching does not prove the account is flat. Do not clear the kill switch until broker positions and fills are independently verified.",
+    }
+
+
+def _safe_nonnegative_int(value) -> int:
+    try:
+        number = int(value or 0)
+    except (TypeError, ValueError, OverflowError):
+        return 0
+    return max(0, number)
