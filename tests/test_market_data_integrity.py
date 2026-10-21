@@ -23,6 +23,9 @@ class FakeHttp:
         self.calls.append((path, kwargs))
         return FakeResponse(self.payload)
 
+    async def aclose(self):
+        return None
+
 
 def test_live_quote_rejects_non_finite_and_non_positive_prices():
     for value in (0, -1, "nan", "inf", "not-a-number"):
