@@ -143,7 +143,7 @@ def test_read_only_reconciliation_blocks_invalid_position_quantity(tmp_path, mon
     assert report["reason"] == "non_finite_position_net_qty"
 
 
-def test_fetch_read_only_broker_reconciliation_fetches_both_snapshots():
+def test_fetch_read_only_broker_reconciliation_fetches_both_snapshots(tmp_path):
     class FakeClient:
         def __init__(self):
             self.calls = []
@@ -165,7 +165,7 @@ def test_fetch_read_only_broker_reconciliation_fetches_both_snapshots():
     assert report["read_only"] is True
 
 
-def test_fetch_read_only_broker_reconciliation_propagates_snapshot_failure():
+def test_fetch_read_only_broker_reconciliation_propagates_snapshot_failure(tmp_path):
     class FakeClient:
         async def order_book(self):
             return []
