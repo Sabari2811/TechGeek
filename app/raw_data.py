@@ -10,6 +10,7 @@ from pathlib import Path
 from .config import IST
 
 RAW_ROOT = Path(".quantnifty/raw")
+AUDIT_ROOT = Path(".quantnifty/audit")
 
 
 def _json_safe(value):
@@ -53,3 +54,20 @@ def load_option_chain_records(path: str | Path) -> list[dict]:
             if isinstance(row, dict) and isinstance(row.get("data"), dict):
                 records.append(row)
     return records
+
+
+
+def record_audit_event(event_type: str, payload: dict,
+                       timestamp: datetime | None = None) -> Path:
+    """Append a timestamped, JSON-safe decision/depth/execution audit event."""
+    timestamp = timestamp or datetime.now(IST)
+    path = AUDIT_ROOT / f"{timestamp.date().isoformat()}.jsonl"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    row = {
+        "timestamp": timestamp.isoformat(),
+        "event_type": str(event_type)[:80],
+        "payload": _json_safe(payload if isinstance(payload, dict) else {}),
+    }
+    with path.open("a", encoding="utf-8") as fh:
+        fh.write(json.dumps(row, separators=(",", ":"), ensure_ascii=False) + "\\n")
+    return path
