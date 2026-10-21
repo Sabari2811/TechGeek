@@ -1,4 +1,5 @@
 import asyncio
+import math
 from datetime import datetime
 from .config import CONFIG, IST
 from .models import MarketState, SignalAudit
@@ -188,12 +189,25 @@ async def run():
                         continue
 
                 if not CONFIG.entries_allowed():
-                    if not p.quote_stale and p.quote_bid > 0:
-                        price = p.quote_bid
-                    elif q and q.bid > 0:
-                        price = q.bid
-                    else:
-                        price = p.current_price
+                    # A stale chain quote or last-traded price is not an
+                    # executable sell limit. Do not submit a guessed square-off
+                    # price; block new entries and require a fresh bid/review.
+                    price = squareoff_limit_price(p)
+                    if price is None:
+                        set_kill_switch(True, "session square-off pending: no fresh positive bid")
+                        record_audit_event("squareoff_blocked_stale_quote", {
+                            "security_id": p.signal.security_id,
+                            "quote_stale": p.quote_stale,
+                            "quote_bid": p.quote_bid,
+                            "quote_source": p.quote_source,
+                            "reason": "fresh positive bid unavailable; manual reconciliation required",
+                        })
+                        Terminal.waiting(
+                            state.spot,
+                            "SQUARE-OFF SAFETY HOLD — no fresh executable bid. New entries blocked; position remains open.",
+                        )
+                        await asyncio.sleep(CONFIG.poll_seconds)
+                        continue
                     closed = await execution.exit(price, "SESSION SQUARE-OFF")
                     if closed is None:
                         Terminal.waiting(
@@ -356,3 +370,16 @@ async def run():
         Terminal.waiting(state.spot, "Stopped by user.")
     finally:
         await client.close()
+
+
+def squareoff_limit_price(position) -> float | None:
+    """Return only a fresh positive bid for closing a long option position."""
+    if position is None or position.quote_stale:
+        return None
+    try:
+        bid = float(position.quote_bid)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    if not math.isfinite(bid) or bid <= 0:
+        return None
+    return bid
