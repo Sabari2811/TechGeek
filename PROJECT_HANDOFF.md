@@ -16,12 +16,15 @@
 - Exit fills are accumulated. If an exit fills only part of the position, the remaining quantity stays open and the trade is not added to the closed-trade ledger yet.
 - Updated `app/models.py` to track initial quantity and cumulative exit fills/proceeds, calculate aggregate realised P&L, and record weighted-average exit price for a fully closed position.
 - Updated `app/trader.py` to handle a partial exit without treating it as a completed trade or training the learner on a partial result.
+- Added `calculate_stop_target` in `app/risk.py`; the stop and target are now derived from the executable entry ask, keeping position sizing and reward/risk calculations on the same price basis. Invalid/non-finite inputs are rejected.
+- Added `tests/test_risk_levels.py` to cover stop/target calculation and invalid inputs.
 - Added `tests/test_execution_partial_fills.py` for partial-exit accounting and duplicate-entry rejection. Tests use simulated broker responses and do not place orders.
 
 ## Validation status
 - Repository source edits were committed on the working branch; the branch head must be checked before further edits.
-- Automated tests have **not yet been executed in a local runtime** in this work session.
-- CI has **not yet been confirmed green** for this branch.
+- GitHub Actions run 39651877542 passed compile and test steps on Python 3.11, 3.12, and 3.14 for the earlier execution-reconciliation commit.
+- Additional stop/target changes and tests were pushed after that run; their latest CI run must still be checked.
+- Automated tests have **not been executed in the user's Windows-local runtime** in this work session.
 - No deployment or production validation has been performed.
 - No API token was requested or used.
 - These changes must not be described as production-ready until automated tests and review are complete.
@@ -41,11 +44,9 @@
 
 ## Required next workflow
 1. Inspect current branch head and diff.
-2. Run focused execution tests, then the complete suite and compile checks.
-3. Fix failures before continuing.
-4. Add regression tests for unresolved order states and entry partial fills.
-5. Fix entry/stop/target consistency.
-6. Improve depth/raw capture and data validation.
-7. Improve historical replay and post-market P&L reconciliation.
-8. Run CI and review the complete diff before merging.
-9. Keep live order routing disabled throughout.
+2. Verify CI for the latest branch head, not only the earlier commit.
+3. Add regression tests for unresolved order states and entry partial fills; decide a safe durable reconciliation/kill-switch policy before live routing.
+4. Improve depth/raw capture and data validation.
+5. Improve historical replay and post-market P&L reconciliation.
+6. Run full CI and review the complete diff before merging.
+7. Keep live order routing disabled throughout.
