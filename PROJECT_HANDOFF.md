@@ -166,3 +166,12 @@
 - When unresolved journal entries exist and a local token is configured, startup now attempts the read-only order-book + derivative intraday-position report, prints it, and still exits in a safety hold. If any snapshot fails, it stays blocked. No token means no snapshot attempt and still blocks.
 - No automatic journal reconciliation, kill-switch clearing, order submit/cancel, or trading resumption. The report only covers DERIVATIVE/INTRADAY and is a point-in-time view.
 - Next work: improve quote-event timestamp validation against documented fields and harden order/trade fill reconciliation. Do not enable live routing. Five-level gate and `data/instruments/fno.csv` remain unchanged.
+
+
+## Quote response latency guard — 2026-10-22
+
+- Official INDstocks full-quote documentation shows `live_price` and market depth but does not document a provider event timestamp for REST full quotes: https://api-docs.indstocks.com/MarketQuote/
+- Added measured request/response latency to `live_quote()`; responses taking longer than `CONFIG.stale_seconds` are rejected after retry rather than treated as fresh.
+- Position monitoring records latency and `freshness_basis=request_round_trip_time_only`. This is a transport-latency guard, not proof of exchange-event age; do not describe it as provider timestamp validation.
+- Added tests for latency metadata and stale-threshold rejection. CI pending on `fix/quote-response-latency-guard`.
+- No live token used. Live routing remains disabled; five-level gate and `data/instruments/fno.csv` unchanged.
