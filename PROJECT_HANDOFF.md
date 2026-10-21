@@ -173,5 +173,12 @@
 - Official INDstocks full-quote documentation shows `live_price` and market depth but does not document a provider event timestamp for REST full quotes: https://api-docs.indstocks.com/MarketQuote/
 - Added measured request/response latency to `live_quote()`; responses taking longer than `CONFIG.stale_seconds` are rejected after retry rather than treated as fresh.
 - Position monitoring records latency and `freshness_basis=request_round_trip_time_only`. This is a transport-latency guard, not proof of exchange-event age; do not describe it as provider timestamp validation.
-- Added tests for latency metadata and stale-threshold rejection. CI pending on `fix/quote-response-latency-guard`.
+- Added tests for latency metadata and stale-threshold rejection. PR #13 merged as `bc183d4909a5fc3548270ee10ac72a760b95e412`; all Python 3.11/3.12/3.14 jobs passed on its exact head in run `39664281748`.
 - No live token used. Live routing remains disabled; five-level gate and `data/instruments/fno.csv` unchanged.
+
+
+## Latest merged quote-latency guard — 2026-10-22
+
+- PR #13 merged to main as `bc183d4909a5fc3548270ee10ac72a760b95e412`; its final-head Python 3.11/3.12/3.14 matrix passed (run `39664281748`). Draft duplicate PR #12 is closed as superseded.
+- Latest quote guard rejects slow REST full-quote responses based on round-trip latency only. Official provider docs do not specify an event timestamp for this REST response; provider event-time freshness remains unresolved.
+- Continue only with documented provider endpoints, offline tests and read-only reconciliation. No live token used. Live order routing remains disabled; five-level microstructure gate and `data/instruments/fno.csv` unchanged.
