@@ -72,9 +72,12 @@ class MicrostructureEngine:
             bq = cls._num(buy.get("quantity") or buy.get("bid_quantity") or buy.get("bidQuantity") or buy.get("qty"))
             ap = cls._num(sell.get("price") or sell.get("ask_price") or sell.get("askPrice"))
             aq = cls._num(sell.get("quantity") or sell.get("ask_quantity") or sell.get("askQuantity") or sell.get("qty"))
-            if bp > 0:
+            # A price without displayed size is not usable liquidity. Reject
+            # zero/negative quantities instead of letting empty levels count
+            # toward the five-level live confirmation gate.
+            if bp > 0 and bq > 0:
                 bids.append((bp, bq))
-            if ap > 0:
+            if ap > 0 and aq > 0:
                 asks.append((ap, aq))
         # Never fabricate missing levels. Replay/unit-test callers may choose
         # to accept a shorter real ladder, but the live entry path explicitly
@@ -86,6 +89,10 @@ class MicrostructureEngine:
 
         best_bid, _ = bids[0]
         best_ask, _ = asks[0]
+        # Crossed or locked top-of-book snapshots are malformed/stale for
+        # this strategy; do not turn them into a positive liquidity score.
+        if best_bid >= best_ask:
+            return None
         total_bid = sum(q for _, q in bids)
         total_ask = sum(q for _, q in asks)
         denom = total_bid + total_ask
