@@ -24,6 +24,7 @@ class ReplaySummary:
     signal_snapshots: int = 0
     blocked_by_phase: int = 0
     blocked_by_ev: int = 0
+    blocked_by_no_candidate: int = 0
     top_rejections: dict[str, int] | None = None
 
 
@@ -50,7 +51,13 @@ def replay_file(path: str | Path, min_net_ev: float = 10.0) -> ReplaySummary:
         if audit.phase not in {"EARLY_CONFIRMATION", "BREAKOUT"}:
             summary.blocked_by_phase += 1
         if signal is None and audit.final_candidates == 0:
-            summary.blocked_by_ev += 1
+            # EV blocking is only counted when the mathematical engine actually
+            # produced at least one candidate eligible for the minimum-EV gate.
+            # Phase/quality failures must not be mislabelled as EV failures.
+            if audit.eligible_before_min_ev > 0:
+                summary.blocked_by_ev += 1
+            else:
+                summary.blocked_by_no_candidate += 1
         for reason, count in audit.rejected.items():
             summary.top_rejections[reason] = summary.top_rejections.get(reason, 0) + count
 
@@ -69,5 +76,6 @@ if __name__ == "__main__":
     print(f"signal_snapshots={result.signal_snapshots}")
     print(f"blocked_by_phase={result.blocked_by_phase}")
     print(f"blocked_by_ev={result.blocked_by_ev}")
+    print(f"blocked_by_no_candidate={result.blocked_by_no_candidate}")
     print("top_rejections=" + str(sorted((result.top_rejections or {}).items(),
                                          key=lambda x: x[1], reverse=True)[:10]))
