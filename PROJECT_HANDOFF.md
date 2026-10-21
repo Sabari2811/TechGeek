@@ -138,3 +138,13 @@
 - `--reconcile` now requires an explicit non-empty `--reason` and its help text reminds the operator to verify both orders and positions. This manual action remains separate from the report.
 - Broker position inventory remains unverified because the provider position endpoint/schema is not confirmed in this repository. The report explicitly says positions were not checked.
 - CI pending for branch `feat/read-only-order-reconciliation-cli`. Live routing remains disabled; five-level gate and `data/instruments/fno.csv` unchanged.
+
+
+## Read-only broker position reconciliation — 2026-10-22
+
+- Verified the INDstocks documented `GET /portfolio/positions?segment=derivative&product=intraday` endpoint and response fields `security_id`, `net_qty`, `symbol`, `segment`, `product`, `drv_instrument`, `drv_expiry_date`, `drv_option_type`, and `drv_strike_price`. Reference: https://api-docs.indstocks.com/portfolio_funds/
+- Added `IndstocksClient.intraday_derivative_positions()` with strict success-envelope, list, required-field, and finite-net-quantity validation.
+- Extended the report CLI to fetch both the order book and derivative intraday position snapshot. Non-zero positions are listed as requiring operator review; malformed snapshots block the report. The report is explicitly scoped to derivative intraday positions and is a point-in-time snapshot.
+- The CLI remains read-only. It does not submit/cancel orders, mutate journal state, or clear the kill switch. A zero-position snapshot alone is not proof against stale responses, subsequent fills, or positions in other segments/products.
+- Added regression tests for the endpoint schema, query parameters, non-zero position flags, clean scoped snapshots, and invalid quantities. CI pending on `feat/read-only-position-reconciliation`.
+- No live token was used. Five-level gate and `data/instruments/fno.csv` unchanged.

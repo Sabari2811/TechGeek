@@ -102,3 +102,42 @@ def test_read_only_broker_reconciliation_requires_list():
     import pytest
     with pytest.raises(TypeError, match="broker_orders must be a list"):
         order_journal.read_only_broker_order_reconciliation({})
+
+
+def test_read_only_reconciliation_flags_nonzero_broker_positions(tmp_path, monkeypatch):
+    monkeypatch.setattr(order_journal, "JOURNAL_ROOT", tmp_path)
+    report = order_journal.read_only_broker_order_reconciliation(
+        [],
+        broker_positions=[{
+            "security_id": "123",
+            "symbol": "NIFTY",
+            "segment": "DERIVATIVE",
+            "product": "INTRADAY",
+            "net_qty": -65,
+            "drv_instrument": "OPTIDX",
+            "drv_expiry_date": "10/29/2026 14:00",
+            "drv_option_type": "PE",
+            "drv_strike_price": 25000,
+        }],
+    )
+    assert report["status"] == "REVIEW_REQUIRED"
+    assert report["broker_positions_checked"] is True
+    assert report["open_positions"][0]["net_qty"] == -65
+    assert report["open_positions"][0]["status"] == "OPEN_POSITION_REQUIRES_OPERATOR_REVIEW"
+
+
+def test_read_only_reconciliation_clean_snapshot_is_scoped_and_read_only(tmp_path, monkeypatch):
+    monkeypatch.setattr(order_journal, "JOURNAL_ROOT", tmp_path)
+    report = order_journal.read_only_broker_order_reconciliation([], broker_positions=[])
+    assert report["status"] == "NO_UNRESOLVED_JOURNAL_ORDERS_AND_NO_OPEN_DERIVATIVE_INTRADAY_POSITIONS"
+    assert report["position_scope"] == "DERIVATIVE/INTRADAY only"
+    assert report["read_only"] is True
+
+
+def test_read_only_reconciliation_blocks_invalid_position_quantity(tmp_path, monkeypatch):
+    monkeypatch.setattr(order_journal, "JOURNAL_ROOT", tmp_path)
+    report = order_journal.read_only_broker_order_reconciliation(
+        [], broker_positions=[{"security_id": "123", "net_qty": "nan"}]
+    )
+    assert report["status"] == "BLOCKED"
+    assert report["reason"] == "non_finite_position_net_qty"

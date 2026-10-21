@@ -75,7 +75,7 @@ def mark_reconciled(client_order_ref: str, reason: str) -> Path:
     )
 
 
-def read_only_broker_order_reconciliation(broker_orders, root: Path | None = None) -> dict:
+def read_only_broker_order_reconciliation(broker_orders, root: Path | None = None, broker_positions=None) -> dict:
     """Compare journaled order IDs with a supplied broker order-book snapshot.
 
     This function is intentionally read-only: it never marks journal entries
@@ -85,6 +85,11 @@ def read_only_broker_order_reconciliation(broker_orders, root: Path | None = Non
     """
     if not isinstance(broker_orders, list):
         raise TypeError("broker_orders must be a list returned by the broker order-book client")
+    if broker_positions is not None and (
+        not isinstance(broker_positions, list)
+        or any(not isinstance(row, dict) for row in broker_positions)
+    ):
+        raise TypeError("broker_positions must be a list of position objects returned by the documented positions endpoint")
 
     latest_by_ref: dict[str, dict] = {}
     root = root or JOURNAL_ROOT
@@ -150,12 +155,59 @@ def read_only_broker_order_reconciliation(broker_orders, root: Path | None = Non
             "status": "MATCHED_ORDER_ONLY_MANUAL_POSITION_CHECK_REQUIRED",
         })
 
+    open_positions = []
+    if broker_positions is not None:
+        import math
+        for position in broker_positions:
+            try:
+                net_qty = float(position.get("net_qty"))
+            except (TypeError, ValueError, OverflowError):
+                return {
+                    "status": "BLOCKED",
+                    "reason": "invalid_position_net_qty",
+                    "read_only": True,
+                    "broker_positions_checked": False,
+                    "orders": results,
+                    "open_positions": [],
+                }
+            if not math.isfinite(net_qty):
+                return {
+                    "status": "BLOCKED",
+                    "reason": "non_finite_position_net_qty",
+                    "read_only": True,
+                    "broker_positions_checked": False,
+                    "orders": results,
+                    "open_positions": [],
+                }
+            if net_qty != 0:
+                open_positions.append({
+                    "security_id": str(position.get("security_id") or ""),
+                    "symbol": str(position.get("symbol") or ""),
+                    "segment": str(position.get("segment") or ""),
+                    "product": str(position.get("product") or ""),
+                    "net_qty": net_qty,
+                    "drv_instrument": str(position.get("drv_instrument") or ""),
+                    "drv_expiry_date": str(position.get("drv_expiry_date") or ""),
+                    "drv_option_type": str(position.get("drv_option_type") or ""),
+                    "drv_strike_price": position.get("drv_strike_price"),
+                    "status": "OPEN_POSITION_REQUIRES_OPERATOR_REVIEW",
+                })
+
+    if results or open_positions:
+        report_status = "REVIEW_REQUIRED"
+    elif broker_positions is None:
+        report_status = "NO_UNRESOLVED_JOURNAL_ORDERS_POSITION_CHECK_NOT_RUN"
+    else:
+        report_status = "NO_UNRESOLVED_JOURNAL_ORDERS_AND_NO_OPEN_DERIVATIVE_INTRADAY_POSITIONS"
+
     return {
-        "status": "REVIEW_REQUIRED" if results else "NO_UNRESOLVED_JOURNAL_ORDERS",
+        "status": report_status,
         "read_only": True,
-        "broker_positions_checked": False,
+        "broker_positions_checked": broker_positions is not None,
+        "position_scope": "DERIVATIVE/INTRADAY only" if broker_positions is not None else "not checked",
         "orders": results,
-        "warning": "Order-book matching does not prove the account is flat. Do not clear the kill switch until broker positions and fills are independently verified.",
+        "open_positions": open_positions,
+        "warning": "This is a point-in-time broker snapshot. It never changes the journal or kill switch. Verify fills, all relevant products/segments and account state before manual reconciliation; a clean snapshot is not a guarantee against later fills or stale data.",
     }
 
 
@@ -192,7 +244,8 @@ if __name__ == "__main__":
             client = IndstocksClient()
             try:
                 orders = await client.order_book()
-                report = read_only_broker_order_reconciliation(orders)
+                positions = await client.intraday_derivative_positions()
+                report = read_only_broker_order_reconciliation(orders, broker_positions=positions)
                 print(json.dumps(report, indent=2, sort_keys=True))
             finally:
                 await client.close()

@@ -97,3 +97,39 @@ def test_contract_lot_size_rejects_ambiguous_matches():
         await client.close()
 
     asyncio.run(scenario())
+
+
+def test_intraday_derivative_positions_uses_documented_read_only_endpoint():
+    payload = {"status": "success", "data": [
+        {"security_id": "123", "net_qty": -65, "segment": "DERIVATIVE", "product": "INTRADAY"}
+    ]}
+
+    async def scenario():
+        client = IndstocksClient()
+        client.http = FakeHttp(payload)
+        positions = await client.intraday_derivative_positions()
+        assert positions[0]["net_qty"] == -65
+        assert client.http.calls == [(
+            "/portfolio/positions",
+            {"params": {"segment": "derivative", "product": "intraday"}},
+        )]
+        await client.close()
+
+    asyncio.run(scenario())
+
+
+def test_intraday_derivative_positions_rejects_bad_schema():
+    payload = {"status": "success", "data": [{"security_id": "123"}]}
+
+    async def scenario():
+        client = IndstocksClient()
+        client.http = FakeHttp(payload)
+        try:
+            await client.intraday_derivative_positions()
+        except RuntimeError as exc:
+            assert "security_id/net_qty" in str(exc)
+        else:
+            raise AssertionError("positions missing net_qty must be rejected")
+        await client.close()
+
+    asyncio.run(scenario())
