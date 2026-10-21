@@ -5,7 +5,7 @@ from .models import MarketState, SignalAudit
 from .market import IndstocksClient, load_chain_into_state, extract_market_depth, summarize_market_depth_payload
 from .math_engine import QuantEngine
 from .microstructure import MicrostructureEngine, MicrostructureState
-from .risk import RiskManager
+from .risk import RiskManager, calculate_stop_target
 from .execution import ExecutionEngine
 from .learning import IncrementalLearner
 from .session_state import load_today, load_today_trades, save_today
@@ -246,8 +246,12 @@ async def run():
                 continue
 
             signal.entry = q.ask
-            signal.stop = max(q.ltp * 0.75, q.ltp - state.spot * 0.001)
-            signal.target = q.ltp + (q.ltp - signal.stop) * 1.8
+            try:
+                signal.stop, signal.target = calculate_stop_target(signal.entry, state.spot)
+            except ValueError as exc:
+                Terminal.waiting(state.spot, f"Candidate rejected: invalid entry/stop/target levels ({exc})", checks)
+                await asyncio.sleep(CONFIG.poll_seconds)
+                continue
             signal.reason += f" | depth={micro_reason}"
 
             lot_size = await client.contract_lot_size(expiry, signal.strike, signal.option_type)
