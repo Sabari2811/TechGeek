@@ -48,7 +48,7 @@ def unresolved_orders(root: Path | None = None) -> dict[str, dict]:
             except (json.JSONDecodeError, KeyError, TypeError, ValueError):
                 return {"__journal_corrupt__": {"event": "corrupt", "path": str(path)}}
             latest[ref] = row
-    terminal = {"terminal_filled", "terminal_no_fill", "terminal_partial_fill"}
+    terminal = {"terminal_no_fill", "reconciled"}
     return {ref: row for ref, row in latest.items() if row.get("event") not in terminal}
 
 
@@ -61,3 +61,28 @@ def enforce_startup_reconciliation() -> dict[str, dict]:
         refs = ", ".join(list(unresolved)[:5])
         set_enabled(True, f"unresolved order journal at startup: {refs}")
     return unresolved
+
+
+
+def mark_reconciled(client_order_ref: str, reason: str) -> Path:
+    """Record explicit operator reconciliation after checking broker state."""
+    if not str(reason).strip():
+        raise ValueError("A reconciliation reason is required")
+    return record_order_event(
+        client_order_ref,
+        "reconciled",
+        {"reason": str(reason).strip()[:300], "operator_confirmed": True},
+    )
+
+
+if __name__ == "__main__":
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        description="Order journal reconciliation. Confirm broker orders and positions first."
+    )
+    parser.add_argument("--reconcile", metavar="CLIENT_ORDER_REF", required=True)
+    parser.add_argument("--reason", required=True)
+    args = parser.parse_args()
+    mark_reconciled(args.reconcile, args.reason)
+    print(f"Recorded reconciliation for {args.reconcile}.")
