@@ -2,6 +2,7 @@ import asyncio
 import json
 from datetime import datetime, timezone
 import math
+import time
 import httpx
 import websockets
 from .config import CONFIG, IST
@@ -41,6 +42,7 @@ class IndstocksClient:
         params = {"scrip-codes": f"NFO_{sid}"}
         last_error = None
         for attempt in range(2):
+            request_started = time.monotonic()
             try:
                 r = await self.http.get("/market/quotes/full", params=params)
                 r.raise_for_status()
@@ -49,8 +51,16 @@ class IndstocksClient:
                     raise RuntimeError(f"quote status={payload.get('status')!r}")
                 quote = _extract_live_quote(payload, sid)
                 if quote.get("ltp", 0.0) > 0:
+                    response_latency = time.monotonic() - request_started
+                    if response_latency > CONFIG.stale_seconds:
+                        raise RuntimeError(
+                            f"quote response latency {response_latency:.3f}s exceeded "
+                            f"stale threshold {CONFIG.stale_seconds:.3f}s"
+                        )
                     quote["source"] = "full_quote"
                     quote["received_at"] = datetime.now(timezone.utc).isoformat()
+                    quote["response_latency_seconds"] = response_latency
+                    quote["freshness_basis"] = "request_round_trip_time_only"
                     return quote
                 raise RuntimeError("full quote returned no live_price")
             except Exception as exc:
