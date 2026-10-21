@@ -54,3 +54,14 @@
 6. Improve operational health reporting and learning idempotency/walk-forward validation.
 7. Run full CI and review the complete diff before merging.
 8. Keep live order routing disabled throughout.
+
+
+## CI failure analysis and correction — 2026-10-21
+
+- PR #3 initially failed in `Compile Python sources`; the exact error was `app/execution.py:121`, an unterminated f-string in the terminal no-fill reconciliation branch.
+- Fixed the syntax error in commit `cc3065123e39938598d7ceb5c2b1cdeb160f168a`.
+- Review identified a more important journal policy edge: a filled order must not be considered reconciled merely because its order is terminal. Updated `unresolved_orders` so filled/partially filled order events remain unresolved until an explicit operator `reconciled` event is recorded. Added `mark_reconciled` with a mandatory reason and tests.
+- Added fail-closed handling when broker order-book lookup fails during reconciliation: it records the error, trips the entry kill switch, and raises instead of assuming the order state.
+- Added offline regression tests for filled-order reconciliation and broker order-book outage.
+- Latest commits: `71e843d7639c113069024ad14804a20f72766314` (explicit reconciliation), `b10698a7b6c729d8192ed3f6b857f18e238396dc` (tests), `7440fa8b2e0f09f456058681306bb95dcb52aff9` (order-book failures), `d3cdca4f27fa973c21037480c46ca5db0409c6f0` (failure regression test).
+- Validation status: awaiting CI for the updated head. No local test suite has been run from the user's Windows environment. Do not merge while CI is red or pending.
