@@ -1,0 +1,76 @@
+import json
+
+from backtest.execution_replay import replay_position_quotes, write_report
+
+
+def _event(timestamp, event_type, payload):
+    return {"timestamp": timestamp, "event_type": event_type, "payload": payload}
+
+
+def test_replay_uses_bid_proxy_and_detects_first_stop_trigger(tmp_path):
+    audit = tmp_path / "audit.jsonl"
+    common = {
+        "security_id": "42", "symbol": "NIFTY26OCT25000CE",
+        "opened_at": "2026-10-22T10:00:00+05:30",
+        "quantity": 65, "entry_price": 100, "stop_price": 90, "target_price": 118,
+    }
+    rows = [
+        _event("2026-10-22T10:00:01+05:30", "position_quote",
+               {**common, "ltp": 99, "bid": 98.5}),
+        _event("2026-10-22T10:00:02+05:30", "position_quote",
+               {**common, "ltp": 89, "bid": 88.5}),
+        _event("2026-10-22T10:00:03+05:30", "position_quote",
+               {**common, "ltp": 80, "bid": 79.5}),
+    ]
+    audit.write_text("\n".join(json.dumps(row) for row in rows), encoding="utf-8")
+
+    results = replay_position_quotes(audit)
+    assert len(results) == 1
+    assert results[0].exit_reason == "STOP_TRIGGER_OBSERVED"
+    assert results[0].exit_price == 88.5
+    assert results[0].gross_pnl == -747.5
+    assert results[0].pnl_is_realized is False
+    assert results[0].quote_count == 3
+
+
+def test_replay_marks_open_position_to_market_not_realized(tmp_path):
+    audit = tmp_path / "audit.jsonl"
+    payload = {
+        "security_id": "42", "symbol": "OPT", "opened_at": "open-time",
+        "quantity": 10, "entry_price": 100, "stop_price": 90, "target_price": 120,
+        "ltp": 105, "bid": 104.5,
+    }
+    audit.write_text(json.dumps(_event("2026-10-22T10:00:00+05:30", "position_quote", payload)))
+    result = replay_position_quotes(audit)[0]
+    assert result.exit_reason == "OPEN_AT_END_OF_CAPTURE"
+    assert result.exit_price == 104.5
+    assert result.gross_pnl == 45
+    assert result.pnl_is_realized is False
+
+
+def test_replay_ignores_non_position_events_and_malformed_lines(tmp_path):
+    audit = tmp_path / "audit.jsonl"
+    audit.write_text(
+        "{broken\n" +
+        json.dumps(_event("2026-10-22T10:00:00+05:30", "signal_rejected", {"x": 1})) +
+        "\n" + json.dumps(_event("2026-10-22T10:00:01+05:30", "position_quote", {
+            "security_id": "42", "opened_at": "open", "quantity": 1,
+            "entry_price": 100, "stop_price": 90, "target_price": 120,
+            "ltp": "nan", "bid": 99,
+        })),
+        encoding="utf-8",
+    )
+    results = replay_position_quotes(audit)
+    assert len(results) == 1
+    assert results[0].quote_count == 0
+    assert results[0].data_warnings
+
+
+def test_report_is_explicitly_diagnostic(tmp_path):
+    audit = tmp_path / "audit.jsonl"
+    output = tmp_path / "report.json"
+    audit.write_text("")
+    report = write_report(audit, output)
+    assert report["report_type"] == "diagnostic_position_quote_replay"
+    assert "Diagnostic estimate only" in report["summary"]["warning"]
+    assert json.loads(output.read_text())["summary"]["positions_observed"] == 0
