@@ -148,3 +148,13 @@
 - The CLI remains read-only. It does not submit/cancel orders, mutate journal state, or clear the kill switch. A zero-position snapshot alone is not proof against stale responses, subsequent fills, or positions in other segments/products.
 - Added regression tests for the endpoint schema, query parameters, non-zero position flags, clean scoped snapshots, and invalid quantities. CI pending on `feat/read-only-position-reconciliation`.
 - No live token was used. Five-level gate and `data/instruments/fno.csv` unchanged.
+
+
+## Startup read-only reconciliation visibility — 2026-10-22
+
+- When the local order journal has unresolved entries and an access token is configured, startup now attempts the same read-only order-book + derivative-intraday-position report before exiting in a safety hold.
+- The startup path prints the report and summary only; it never submits/cancels orders, auto-reconciles journal entries, clears the kill switch, or resumes trading. If either snapshot fails, startup remains blocked and says manual reconciliation is required.
+- If no access token is configured, startup still blocks and reports that the broker snapshot was not attempted.
+- Added tests for both-snapshot retrieval and fail-closed propagation of a positions endpoint failure.
+- PR #10 was merged as `a448c974f4a165410b113b20eded28049ba44977`; all Python 3.11/3.12/3.14 matrix jobs passed on the PR head in run `39663789162`. Post-merge main CI is pending at the time of this handoff edit.
+- Live routing remains disabled. The report only covers derivative intraday positions; this is not a guarantee about all products/segments or future account state. Five-level gate and `data/instruments/fno.csv` unchanged.

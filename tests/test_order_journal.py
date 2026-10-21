@@ -141,3 +141,39 @@ def test_read_only_reconciliation_blocks_invalid_position_quantity(tmp_path, mon
     )
     assert report["status"] == "BLOCKED"
     assert report["reason"] == "non_finite_position_net_qty"
+
+
+def test_fetch_read_only_broker_reconciliation_fetches_both_snapshots():
+    class FakeClient:
+        def __init__(self):
+            self.calls = []
+
+        async def order_book(self):
+            self.calls.append("orders")
+            return []
+
+        async def intraday_derivative_positions(self):
+            self.calls.append("positions")
+            return []
+
+    import asyncio
+    client = FakeClient()
+    report = asyncio.run(order_journal.fetch_read_only_broker_reconciliation(client))
+    assert client.calls == ["orders", "positions"]
+    assert report["broker_positions_checked"] is True
+    assert report["open_positions"] == []
+    assert report["read_only"] is True
+
+
+def test_fetch_read_only_broker_reconciliation_propagates_snapshot_failure():
+    class FakeClient:
+        async def order_book(self):
+            return []
+
+        async def intraday_derivative_positions(self):
+            raise RuntimeError("position endpoint unavailable")
+
+    import asyncio
+    import pytest
+    with pytest.raises(RuntimeError, match="position endpoint unavailable"):
+        asyncio.run(order_journal.fetch_read_only_broker_reconciliation(FakeClient()))

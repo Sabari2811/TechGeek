@@ -1,4 +1,5 @@
 import asyncio
+import json
 import math
 from datetime import datetime
 from .config import CONFIG, IST
@@ -12,7 +13,7 @@ from .learning import IncrementalLearner
 from .session_state import load_today, load_today_trades, save_today
 from .raw_data import record_option_chain, record_audit_event
 from .terminal import Terminal
-from .order_journal import enforce_startup_reconciliation
+from .order_journal import enforce_startup_reconciliation, fetch_read_only_broker_reconciliation
 
 
 async def next_expiry(client: IndstocksClient) -> str:
@@ -29,10 +30,28 @@ async def run():
     # application can consider new entries. Never infer broker flatness.
     unresolved_orders = enforce_startup_reconciliation()
     if unresolved_orders:
+        report_summary = "Broker snapshot not attempted (access token missing)."
+        if CONFIG.access_token:
+            reconciliation_client = IndstocksClient()
+            try:
+                report = await fetch_read_only_broker_reconciliation(reconciliation_client)
+                print("STARTUP READ-ONLY BROKER RECONCILIATION")
+                print(json.dumps(report, indent=2, sort_keys=True))
+                report_summary = (
+                    f"read-only report status={report.get('status')}; "
+                    f"unresolved journal items={len(unresolved_orders)}; "
+                    f"non-zero derivative intraday positions={len(report.get('open_positions', []))}"
+                )
+            except Exception as exc:
+                # A failed or incomplete snapshot must never unblock startup.
+                report_summary = f"read-only broker snapshot failed ({type(exc).__name__}); manual reconciliation required"
+            finally:
+                await reconciliation_client.close()
         Terminal.waiting(
             reason=(
                 f"STARTUP SAFETY HOLD — {len(unresolved_orders)} unresolved journal item(s). "
-                "Reconcile broker order book/positions, then explicitly clear the kill switch."
+                f"{report_summary} No orders were submitted; position/journal state was not changed. "
+                "Verify broker orders, fills and positions, then explicitly clear the kill switch."
             )
         )
         return

@@ -219,6 +219,13 @@ def _safe_nonnegative_int(value) -> int:
     return max(0, number)
 
 
+async def fetch_read_only_broker_reconciliation(client) -> dict:
+    """Fetch order and derivative-intraday position snapshots without side effects."""
+    orders = await client.order_book()
+    positions = await client.intraday_derivative_positions()
+    return read_only_broker_order_reconciliation(orders, broker_positions=positions)
+
+
 
 if __name__ == "__main__":
     import argparse
