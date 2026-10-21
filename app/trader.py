@@ -11,6 +11,7 @@ from .learning import IncrementalLearner
 from .session_state import load_today, load_today_trades, save_today
 from .raw_data import record_option_chain, record_audit_event
 from .terminal import Terminal
+from .order_journal import enforce_startup_reconciliation
 
 
 async def next_expiry(client: IndstocksClient) -> str:
@@ -23,6 +24,18 @@ async def next_expiry(client: IndstocksClient) -> str:
 
 
 async def run():
+    # Resolve any order intent left unfinished by a prior process before the
+    # application can consider new entries. Never infer broker flatness.
+    unresolved_orders = enforce_startup_reconciliation()
+    if unresolved_orders:
+        Terminal.waiting(
+            reason=(
+                f"STARTUP SAFETY HOLD — {len(unresolved_orders)} unresolved journal item(s). "
+                "Reconcile broker order book/positions, then explicitly clear the kill switch."
+            )
+        )
+        return
+
     if not CONFIG.access_token:
         Terminal.waiting(reason="INDSTOCKS_ACCESS_TOKEN is missing. Configure .env first.")
         return
