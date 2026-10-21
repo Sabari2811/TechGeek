@@ -1,5 +1,6 @@
-from datetime import date
+from datetime import datetime, timedelta
 
+from app.config import IST
 from app.learning import IncrementalLearner
 from app.models import TradeSignal
 
@@ -27,7 +28,7 @@ def test_learning_persists_and_records(tmp_path):
 def test_learning_updates_only_after_day_changes(tmp_path):
     learner = IncrementalLearner(str(tmp_path / "state.json"))
     learner.record(signal(), 100)
-    assert not learner.learn_if_new_day(date.today().isoformat())
+    assert not learner.learn_if_new_day(datetime.now(IST).date().isoformat())
     assert learner.summary()["outcomes"] == 0
 
     assert learner.learn_if_new_day("2099-01-01")
@@ -43,3 +44,30 @@ def test_probability_calibration_is_bounded(tmp_path):
     assert learner.probability(0.90) == 0.90
     learner.state.probability_bias = -0.05
     assert learner.probability(0.10) == 0.10
+
+
+def test_multiple_old_outcomes_are_processed_and_persisted(tmp_path):
+    path = tmp_path / "state.json"
+    learner = IncrementalLearner(str(path))
+
+    learner.record(signal(0.60), 100.0)
+    learner.record(signal(0.65), -50.0)
+    learner.record(signal(0.55), -25.0)
+
+    next_day = (
+        datetime.now(IST).date() + timedelta(days=1)
+    ).isoformat()
+
+    assert learner.learn_if_new_day(next_day) is True
+
+    summary = learner.summary()
+    assert summary["outcomes"] == 3
+    assert summary["wins"] == 1
+    assert summary["losses"] == 2
+    assert summary["pending"] == 0
+
+    restored = IncrementalLearner(str(path))
+    assert restored.summary()["outcomes"] == 3
+    assert restored.summary()["wins"] == 1
+    assert restored.summary()["losses"] == 2
+    assert restored.summary()["pending"] == 0

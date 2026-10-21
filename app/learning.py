@@ -5,6 +5,7 @@ import os
 import tempfile
 from dataclasses import dataclass, field
 from datetime import datetime
+from .config import IST
 from pathlib import Path
 from typing import Dict, List
 
@@ -86,7 +87,7 @@ class IncrementalLearner:
     def record(self, signal, pnl: float) -> None:
         outcome = 1.0 if pnl > 0 else 0.0
         self.state.pending.append({
-            "date": datetime.now().date().isoformat(),
+            "date": datetime.now(IST).date().isoformat(),
             "probability": self._result_probability(signal),
             "pnl": float(pnl),
             "components": dict(getattr(signal, "score_components", {})),
@@ -101,7 +102,7 @@ class IncrementalLearner:
         return self.state.weights.get(name, 1.0)
 
     def learn_if_new_day(self, current_date: str | None = None) -> bool:
-        today = current_date or datetime.now().date().isoformat()
+        today = current_date or datetime.now(IST).date().isoformat()
         if not self.state.pending:
             self.state.last_learning_date = today
             self._save()
