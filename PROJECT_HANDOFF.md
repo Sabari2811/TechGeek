@@ -146,7 +146,7 @@
 - Added `IndstocksClient.intraday_derivative_positions()` with strict success-envelope, list, required-field, and finite-net-quantity validation.
 - Extended the report CLI to fetch both the order book and derivative intraday position snapshot. Non-zero positions are listed as requiring operator review; malformed snapshots block the report. The report is explicitly scoped to derivative intraday positions and is a point-in-time snapshot.
 - The CLI remains read-only. It does not submit/cancel orders, mutate journal state, or clear the kill switch. A zero-position snapshot alone is not proof against stale responses, subsequent fills, or positions in other segments/products.
-- Added regression tests for the endpoint schema, query parameters, non-zero position flags, clean scoped snapshots, and invalid quantities. CI pending on `feat/read-only-position-reconciliation`.
+- Added regression tests for the endpoint schema, query parameters, non-zero position flags, clean scoped snapshots, and invalid quantities. PR #10 merged as `a448c974f4a165410b113b20eded28049ba44977`; all Python 3.11/3.12/3.14 jobs passed on the PR head in run `39663789162`.
 - No live token was used. Five-level gate and `data/instruments/fno.csv` unchanged.
 
 
@@ -156,5 +156,13 @@
 - The startup path prints the report and summary only; it never submits/cancels orders, auto-reconciles journal entries, clears the kill switch, or resumes trading. If either snapshot fails, startup remains blocked and says manual reconciliation is required.
 - If no access token is configured, startup still blocks and reports that the broker snapshot was not attempted.
 - Added tests for both-snapshot retrieval and fail-closed propagation of a positions endpoint failure.
-- PR #10 was merged as `a448c974f4a165410b113b20eded28049ba44977`; all Python 3.11/3.12/3.14 matrix jobs passed on the PR head in run `39663789162`. Post-merge main CI is pending at the time of this handoff edit.
+- PR #10 merged as `a448c974f4a165410b113b20eded28049ba44977`; all Python 3.11/3.12/3.14 jobs passed on its PR head, and post-merge main CI run `39663868581` passed.
 - Live routing remains disabled. The report only covers derivative intraday positions; this is not a guarantee about all products/segments or future account state. Five-level gate and `data/instruments/fno.csv` unchanged.
+
+
+## Startup reconciliation follow-up — 2026-10-22
+
+- PR #11 merged to main as `cf58ba58c06029c50348d8bb733b6f546f02310c` after Python 3.11/3.12/3.14 CI passed on the final PR head in run `39663987345`.
+- When unresolved journal entries exist and a local token is configured, startup now attempts the read-only order-book + derivative intraday-position report, prints it, and still exits in a safety hold. If any snapshot fails, it stays blocked. No token means no snapshot attempt and still blocks.
+- No automatic journal reconciliation, kill-switch clearing, order submit/cancel, or trading resumption. The report only covers DERIVATIVE/INTRADAY and is a point-in-time view.
+- Next work: improve quote-event timestamp validation against documented fields and harden order/trade fill reconciliation. Do not enable live routing. Five-level gate and `data/instruments/fno.csv` remain unchanged.
