@@ -153,6 +153,13 @@ class Position:
     quote_stale: bool = True
     exit_price: float = 0.0
     exit_reason: str = ""
+    initial_quantity: int = 0
+    exit_filled_quantity: int = 0
+    exit_proceeds: float = 0.0
+
+    def __post_init__(self) -> None:
+        if self.initial_quantity <= 0:
+            self.initial_quantity = self.quantity
 
     @property
     def unrealized_pnl(self) -> float:
@@ -160,9 +167,13 @@ class Position:
 
     @property
     def realized_pnl(self) -> float:
-        if self.exit_price <= 0:
-            return 0.0
-        return (self.exit_price - self.entry_price) * self.quantity
+        if self.exit_filled_quantity > 0:
+            return self.exit_proceeds - self.entry_price * self.exit_filled_quantity
+        # Compatibility for callers constructing an already-closed legacy
+        # Position directly in tests or persisted-data migration paths.
+        if self.exit_price > 0:
+            return (self.exit_price - self.entry_price) * self.quantity
+        return 0.0
 
 
 @dataclass
@@ -189,7 +200,7 @@ class TradeRecord:
             entry_price=position.entry_price,
             stop_price=position.signal.stop,
             exit_price=position.exit_price,
-            quantity=position.quantity,
+            quantity=position.initial_quantity or position.quantity,
             opened_at=position.opened_at,
             closed_at=closed_at,
             pnl=position.realized_pnl,
