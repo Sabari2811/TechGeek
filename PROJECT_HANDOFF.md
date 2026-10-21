@@ -129,3 +129,12 @@
 - Read-only order-book reconciliation reports local journal/order-book matches but intentionally does not reconcile the account's position inventory or clear the kill switch.
 - The latest merged code still needs post-merge CI validation; check the newest main run before further merge actions.
 - Remaining work is not safe to call complete: provider event timestamp schema and account positions API schema are unverified. Do not invent either endpoint or enable live routing. Restart recovery must remain fail-closed until verified broker order AND position reconciliation is available.
+
+
+## Operator CLI for read-only broker order report — 2026-10-22
+
+- Added `python -m app.order_journal --report-broker-order-book` to fetch the existing documented order-book endpoint and print the read-only reconciliation report.
+- This command performs only an HTTP GET through the existing `order_book()` client method. It does not submit/cancel orders, mutate the journal, or clear the kill switch. It requires the user's local `INDSTOCKS_ACCESS_TOKEN`; no token was requested or used during implementation.
+- `--reconcile` now requires an explicit non-empty `--reason` and its help text reminds the operator to verify both orders and positions. This manual action remains separate from the report.
+- Broker position inventory remains unverified because the provider position endpoint/schema is not confirmed in this repository. The report explicitly says positions were not checked.
+- CI pending for branch `feat/read-only-order-reconciliation-cli`. Live routing remains disabled; five-level gate and `data/instruments/fno.csv` unchanged.
