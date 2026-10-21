@@ -92,7 +92,7 @@ def test_reconcile_recorded_partial_exit_fills_without_claiming_realized_pnl(tmp
             "cumulative_exit_quantity": 4, "reason": "TARGET", "mode": "LIVE",
         }),
     ]
-    audit.write_text("\\n".join(json.dumps(row) for row in rows), encoding="utf-8")
+    audit.write_text("\n".join(json.dumps(row) for row in rows), encoding="utf-8")
 
     result = reconcile_recorded_fills(audit)
     assert len(result) == 1
@@ -120,7 +120,7 @@ def test_reconcile_recorded_complete_live_exit_uses_fill_prices(tmp_path):
             **identity, "fill_price": 106, "filled_quantity": 6, "reason": "TARGET",
         }),
     ]
-    audit.write_text("\\n".join(json.dumps(row) for row in rows), encoding="utf-8")
+    audit.write_text("\n".join(json.dumps(row) for row in rows), encoding="utf-8")
 
     result = reconcile_recorded_fills(audit)[0]
     assert result["fully_exited_in_recorded_events"] is True
@@ -145,7 +145,7 @@ def test_reconcile_labels_paper_events_as_simulated(tmp_path):
             "mode": "PAPER",
         }),
     ]
-    audit.write_text("\\n".join(json.dumps(row) for row in rows), encoding="utf-8")
+    audit.write_text("\n".join(json.dumps(row) for row in rows), encoding="utf-8")
 
     result = reconcile_recorded_fills(audit)[0]
     assert result["classification"] == "PAPER_SIMULATED_FILL"
