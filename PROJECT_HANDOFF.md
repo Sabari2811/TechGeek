@@ -22,10 +22,12 @@
 - Hardened `app/microstructure.py`: zero/negative-size levels no longer count as liquidity, and locked/crossed best bid/ask snapshots are rejected. The five-level live requirement remains unchanged; regression tests were added.
 - Added `app/kill_switch.py`, a persistent fail-closed entry kill switch. The missing file means OFF; corrupt/unreadable state means ON. `ExecutionEngine.enter` enforces it before any broker call, the terminal monitor displays status, and unresolved order state trips it. Operator controls: `python -m app.kill_switch --on --reason "reason"`, `python -m app.kill_switch --off --reason "reviewed"`, or `python -m app.kill_switch --status`.
 - Added separate `.quantnifty/audit/YYYY-MM-DD.jsonl` capture for signal rejections, microstructure payloads/gate outcomes, and confirmed entry/exit fills. It is separate from chain replay files so chain loaders do not confuse audit events for market snapshots. Added tests for JSON-safe audit capture.
+- Fixed replay blocking attribution: EV blocks are now counted only when a candidate actually reached the minimum-EV gate; other no-candidate outcomes are tracked separately. Added regression tests.
 
 ## Validation status
 - Branch head must be checked before further edits; current recent commit is `57a175e7817fc21e88ef2dbc4a57912d87b50142` before any subsequent documentation updates.
-- GitHub Actions run 39651877542 passed compile and test steps on Python 3.11, 3.12, and 3.14 for an earlier revision. No workflow run was returned for the most recent kill-switch/audit commits at the last check; latest CI is therefore **not yet confirmed**.
+- GitHub Actions run 39652726221 passed for commit `52f00b51297403628a092d5cd09b049607f8a055` on Python 3.11, 3.12, and 3.14, including kill-switch and audit tests.
+- Replay attribution changes and their tests were added afterward; latest CI must be confirmed for the current head before merge.
 - Automated tests have not been executed in the user's Windows-local runtime.
 - Automated tests have **not been executed in the user's Windows-local runtime** in this work session.
 - No deployment or production validation has been performed.
