@@ -211,7 +211,34 @@ class IndstocksClient:
     async def order_book(self):
         r = await self.http.get("/order-book")
         r.raise_for_status()
-        return r.json().get("data", [])
+        payload = r.json()
+        if not isinstance(payload, dict) or payload.get("status") != "success" or not isinstance(payload.get("data"), list):
+            raise RuntimeError("Broker order-book response did not match the documented success schema")
+        return payload["data"]
+
+    async def intraday_derivative_positions(self) -> list[dict]:
+        """Fetch the documented derivative intraday position snapshot (read-only)."""
+        r = await self.http.get(
+            "/portfolio/positions",
+            params={"segment": "derivative", "product": "intraday"},
+        )
+        r.raise_for_status()
+        payload = r.json()
+        if not isinstance(payload, dict) or payload.get("status") != "success":
+            raise RuntimeError("Broker position response status was not success")
+        positions = payload.get("data")
+        if not isinstance(positions, list) or any(not isinstance(row, dict) for row in positions):
+            raise RuntimeError("Broker position response did not match the documented positions schema")
+        for row in positions:
+            if "security_id" not in row or "net_qty" not in row:
+                raise RuntimeError("Broker position row missing documented security_id/net_qty fields")
+            try:
+                qty = float(row["net_qty"])
+            except (TypeError, ValueError, OverflowError) as exc:
+                raise RuntimeError("Broker position row has invalid net_qty") from exc
+            if not math.isfinite(qty):
+                raise RuntimeError("Broker position row has non-finite net_qty")
+        return positions
 
     async def stream(self, instruments: list[str]):
         url = "wss://ws-prices.indstocks.com/api/v1/ws/prices"
