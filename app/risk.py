@@ -10,6 +10,24 @@ class RiskState:
     halted: bool = False
     halt_reason: str = ""
 
+
+def calculate_stop_target(entry_price: float, spot_price: float, reward_risk: float = 1.8) -> tuple[float, float]:
+    """Calculate option stop/target from the executable entry price.
+
+    The stop-distance policy retains the existing formula, but uses entry
+    rather than last-traded price so risk sizing and the target use the same
+    price basis as the proposed trade.
+    """
+    if not all(map(lambda value: isinstance(value, (int, float)) and value > 0,
+                   (entry_price, spot_price, reward_risk))):
+        raise ValueError("entry price, spot price, and reward/risk must be positive")
+    stop = max(entry_price * 0.75, entry_price - spot_price * 0.001)
+    if stop <= 0 or stop >= entry_price:
+        raise ValueError("calculated stop must be positive and below entry")
+    target = entry_price + (entry_price - stop) * reward_risk
+    return stop, target
+
+
 class RiskManager:
     def __init__(self):
         self.state = RiskState()
