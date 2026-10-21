@@ -5,7 +5,7 @@ from datetime import datetime
 from .config import CONFIG
 from .models import Position, TradeRecord, TradeSignal
 from .market import IndstocksClient
-from .kill_switch import status as kill_switch_status
+from .kill_switch import status as kill_switch_status, set_enabled as set_kill_switch
 from .raw_data import record_audit_event
 
 
@@ -45,7 +45,8 @@ class ExecutionEngine:
             raise RuntimeError(f"Order rejected: {response}")
         order_id = data.get("order_id")
         if not order_id:
-            raise RuntimeError("Broker accepted order but returned no order_id")
+            set_kill_switch(True, "broker accepted an order without returning an order ID")
+            raise RuntimeError("Broker accepted order but returned no order_id; entry kill switch enabled")
         order_id = str(order_id)
 
         terminal = {
@@ -74,6 +75,7 @@ class ExecutionEngine:
             try:
                 await self.client.cancel_order(order_id)
             except Exception as exc:
+                set_kill_switch(True, f"unresolved order {order_id}; cancellation failed")
                 raise RuntimeError(
                     f"Order state unresolved after reconciliation timeout; cancellation failed "
                     f"(order_id={order_id}): {exc}"
@@ -88,6 +90,7 @@ class ExecutionEngine:
             await asyncio.sleep(0.25)
 
         traded_qty = self._traded_quantity(latest or {})
+        set_kill_switch(True, f"unresolved order {order_id}; manual reconciliation required")
         raise RuntimeError(
             f"Order state unresolved after cancellation; refusing to assume it is closed "
             f"(order_id={order_id}, observed_traded_qty={traded_qty})"
