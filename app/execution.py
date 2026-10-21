@@ -6,6 +6,7 @@ from .config import CONFIG
 from .models import Position, TradeRecord, TradeSignal
 from .market import IndstocksClient
 from .kill_switch import status as kill_switch_status
+from .raw_data import record_audit_event
 
 
 class ExecutionEngine:
@@ -120,6 +121,16 @@ class ExecutionEngine:
             opened_at=datetime.now(),
             current_price=entry,
         )
+        record_audit_event("entry_filled", {
+            "symbol": signal.symbol,
+            "security_id": signal.security_id,
+            "option_type": signal.option_type,
+            "strike": signal.strike,
+            "entry_price": entry,
+            "requested_quantity": quantity,
+            "filled_quantity": qty,
+            "mode": CONFIG.mode,
+        })
         return self.position
 
     async def exit(self, price: float, reason: str) -> Position | None:
@@ -150,6 +161,17 @@ class ExecutionEngine:
         p.exit_proceeds += fill_price * traded_qty
         p.quantity -= traded_qty
         p.exit_reason = reason
+        record_audit_event("exit_fill", {
+            "symbol": p.signal.symbol,
+            "security_id": p.signal.security_id,
+            "reason": reason,
+            "fill_price": fill_price,
+            "filled_quantity": traded_qty,
+            "remaining_quantity": p.quantity,
+            "cumulative_exit_quantity": p.exit_filled_quantity,
+            "cumulative_exit_proceeds": p.exit_proceeds,
+            "mode": CONFIG.mode,
+        })
         if p.quantity > 0:
             return None
 
