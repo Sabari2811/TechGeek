@@ -69,5 +69,5 @@ def record_audit_event(event_type: str, payload: dict,
         "payload": _json_safe(payload if isinstance(payload, dict) else {}),
     }
     with path.open("a", encoding="utf-8") as fh:
-        fh.write(json.dumps(row, separators=(",", ":"), ensure_ascii=False) + "\\n")
+        fh.write(json.dumps(row, separators=(",", ":"), ensure_ascii=False) + "\n")
     return path
