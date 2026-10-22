@@ -104,7 +104,10 @@ def test_partial_exit_keeps_remaining_position_and_accumulates_fills(live_mode):
     asyncio.run(scenario())
 
 
-def test_duplicate_entry_is_rejected():
+def test_duplicate_entry_is_rejected(monkeypatch, tmp_path):
+    import app.kill_switch as kill_switch
+    monkeypatch.setattr(kill_switch, "KILL_SWITCH_PATH", tmp_path / "kill_switch.json")
+
     async def scenario():
         engine = ExecutionEngine(FakeClient([]))
         engine.position = Position(
