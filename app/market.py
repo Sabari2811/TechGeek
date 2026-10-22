@@ -257,7 +257,10 @@ class IndstocksClient:
         normalized_segment = str(segment).strip().upper()
         if normalized_segment not in {"EQUITY", "DERIVATIVE", "COMMODITY"}:
             raise ValueError("segment must be EQUITY, DERIVATIVE, or COMMODITY")
-        r = await self.http.get(
+        # httpx.AsyncClient.get() does not accept a JSON body; request() does.
+        # Keep the provider's documented GET method and JSON payload unchanged.
+        r = await self.http.request(
+            "GET",
             "/order/trades",
             json={"order_id": str(order_id), "segment": normalized_segment},
         )

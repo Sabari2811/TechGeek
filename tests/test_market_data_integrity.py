@@ -24,6 +24,11 @@ class FakeHttp:
         self.calls.append((path, kwargs))
         return FakeResponse(self.payload)
 
+    async def request(self, method, path, **kwargs):
+        self.methods = getattr(self, "methods", []) + [method]
+        self.calls.append((path, kwargs))
+        return FakeResponse(self.payload)
+
     async def aclose(self):
         return None
 
@@ -200,6 +205,7 @@ def test_order_trades_uses_documented_get_body_and_validates_fills():
         client.http = FakeHttp(payload)
         fills = await client.order_trades("ORD-123", "DERIVATIVE")
         assert len(fills) == 2
+        assert client.http.methods == ["GET"]
         assert client.http.calls == [(
             "/order/trades",
             {"json": {"order_id": "ORD-123", "segment": "DERIVATIVE"}},
