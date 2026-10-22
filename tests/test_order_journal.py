@@ -210,3 +210,28 @@ def test_read_only_reconciliation_flags_trade_fill_quantity_mismatch(tmp_path, m
         broker_trades={"ORD-1": [{"quantity": 5, "price": 100}]},
     )
     assert report["orders"][0]["fill_reconciliation"] == "FILL_QUANTITY_MISMATCH_REQUIRES_REVIEW"
+
+
+def test_fetch_read_only_reconciliation_reports_per_order_fill_errors(tmp_path, monkeypatch):
+    import asyncio
+
+    monkeypatch.setattr(order_journal, "JOURNAL_ROOT", tmp_path)
+    order_journal.record_order_event("entry-1", "intent", {"requested_quantity": 10})
+    order_journal.record_order_event("entry-1", "broker_order_id_received", {"order_id": "ORD-BAD"})
+
+    class FakeClient:
+        async def order_book(self):
+            return [{"id": "ORD-BAD", "status": "CANCELLED", "traded_qty": 0}]
+
+        async def intraday_derivative_positions(self):
+            return []
+
+        async def order_trades(self, order_id, segment):
+            raise RuntimeError("400 Bad Request: invalid order id")
+
+    report = asyncio.run(order_journal.fetch_read_only_broker_reconciliation(FakeClient(), root=tmp_path))
+    assert report["reconciliation_complete"] is False
+    assert report["manual_review_required"] is True
+    assert report["trade_fetch_errors"]["ORD-BAD"]["message"] == "400 Bad Request: invalid order id"
+    assert report["broker_positions_checked"] is True
+    assert "entry-1" in order_journal.unresolved_orders()

@@ -271,11 +271,25 @@ async def fetch_read_only_broker_reconciliation(client, root: Path | None = None
         if order_id:
             order_ids.add(str(order_id))
     trade_fills = {}
+    trade_fetch_errors = {}
     for order_id in sorted(order_ids):
-        trade_fills[order_id] = await client.order_trades(order_id, "DERIVATIVE")
-    return read_only_broker_order_reconciliation(
+        try:
+            trade_fills[order_id] = await client.order_trades(order_id, "DERIVATIVE")
+        except Exception as exc:
+            # One unsupported/stale broker order ID must not hide the order-book
+            # and position snapshots. Keep the report explicitly incomplete.
+            trade_fetch_errors[order_id] = {
+                "error_type": type(exc).__name__,
+                "message": str(exc),
+            }
+    report = read_only_broker_order_reconciliation(
         orders, root=root, broker_positions=positions, broker_trades=trade_fills
     )
+    report["trade_fetch_errors"] = trade_fetch_errors
+    report["reconciliation_complete"] = not trade_fetch_errors
+    if trade_fetch_errors:
+        report["manual_review_required"] = True
+    return report
 
 
 
