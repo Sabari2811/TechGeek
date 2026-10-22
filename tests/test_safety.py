@@ -10,7 +10,9 @@ def test_live_orders_require_explicit_second_key(monkeypatch):
     assert CONFIG.live_enabled() is False
 
 
-def test_paper_entry_never_calls_broker_order(monkeypatch):
+def test_paper_entry_never_calls_broker_order(monkeypatch, tmp_path):
+    import app.kill_switch as kill_switch
+    monkeypatch.setattr(kill_switch, "KILL_SWITCH_PATH", tmp_path / "kill_switch.json")
     monkeypatch.setenv("ENABLE_LIVE_TRADING", "NO")
     calls = []
 
