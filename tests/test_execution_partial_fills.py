@@ -57,7 +57,6 @@ def make_signal(quantity=5):
 @pytest.fixture
 def live_mode(monkeypatch, tmp_path):
     # Keep simulated broker events out of the real .quantnifty/orders journal.
-    from app.order_journal import JOURNAL_ROOT
     monkeypatch.setattr("app.order_journal.JOURNAL_ROOT", tmp_path / "orders")
     monkeypatch.setattr(type(CONFIG), "live_enabled", lambda self: True)
     async def no_sleep(_seconds):
