@@ -199,3 +199,10 @@
 - Read-only reconciliation now checks order-book status, documented derivative-intraday position snapshot, and per-order trade fills for unresolved journaled order IDs. It compares fill quantity against the order book and flags mismatches for manual review.
 - It still does not auto-clear the kill switch or mark journal records reconciled. Startup stays blocked until operator verification. The position snapshot only covers DERIVATIVE/INTRADAY; review all relevant segments/products and current broker state before manually clearing.
 - Live routing remains disabled. No live token or broker account was used during development. Five-level gate and `data/instruments/fno.csv` unchanged.
+
+
+## Local startup reconciliation fix — 2026-10-22
+
+- Fixed `order_trades()` to use `httpx.AsyncClient.request("GET", ...)` with the documented JSON body; `AsyncClient.get()` rejects the `json` argument and caused a TypeError during startup reconciliation.
+- Added a regression assertion that the fill endpoint is invoked using GET while preserving its JSON payload and fill-schema validation.
+- Startup remains fail-closed: this fix does not clear the kill switch or reconcile orders automatically. Verify broker orders, fills, and positions before operator reconciliation.
