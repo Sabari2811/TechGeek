@@ -206,3 +206,9 @@
 - Fixed `order_trades()` to use `httpx.AsyncClient.request("GET", ...)` with the documented JSON body; `AsyncClient.get()` rejects the `json` argument and caused a TypeError during startup reconciliation.
 - Added a regression assertion that the fill endpoint is invoked using GET while preserving its JSON payload and fill-schema validation.
 - Startup remains fail-closed: this fix does not clear the kill switch or reconcile orders automatically. Verify broker orders, fills, and positions before operator reconciliation.
+
+
+## Per-order fill lookup failure handling — 2026-10-22
+
+- Read-only broker reconciliation now continues to report the order book and derivative intraday positions if an individual per-order fill lookup fails.
+- Failed fill lookups are listed under `trade_fetch_errors`, `reconciliation_complete` is false, and `manual_review_required` is true. This is diagnostic only and never clears unresolved journal records or the kill switch.
