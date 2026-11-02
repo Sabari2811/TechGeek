@@ -459,6 +459,7 @@ class QuantEngine:
         if audit is not None:
             audit.total_options = 0
             audit.calls = audit.puts = 0
+            audit.candidate_events.clear()
             audit.rejected.clear()
             audit.best_rejected_reason = ""
             audit.best_rejected_symbol = ""
@@ -489,6 +490,58 @@ class QuantEngine:
                     audit.puts += 1
             signal, reason, metrics = cls.evaluate_diagnostic(state, q, risk_per_share, learner=learner)
             if audit is not None:
+                quote_ts = q.observed_at
+                if quote_ts is not None and quote_ts.tzinfo is None:
+                    quote_ts = quote_ts.replace(tzinfo=IST)
+                quote_age = (
+                    max(0.0, (datetime.now(IST) - quote_ts).total_seconds())
+                    if quote_ts is not None else None
+                )
+                eligible = bool(signal and signal.net_expected_value >= min_net_ev)
+                audit.candidate_events.append({
+                    "security_id": q.security_id,
+                    "symbol": q.symbol,
+                    "option_type": q.option_type,
+                    "strike": q.strike,
+                    "expiry": state.expiry,
+                    "spot": state.spot,
+                    "futures": state.futures if state.futures > 0 else None,
+                    "vix": state.vix if state.vix > 0 else None,
+                    "option_quote_timestamp": quote_ts.isoformat() if quote_ts else None,
+                    "option_quote_age_seconds": quote_age,
+                    "ltp": q.ltp,
+                    "bid": q.bid,
+                    "ask": q.ask,
+                    "spread": q.spread,
+                    "spread_pct": q.spread_pct,
+                    "volume": q.volume,
+                    "oi": q.oi,
+                    "previous_oi": q.previous_oi,
+                    "oi_change": q.oi_change,
+                    "iv": q.iv,
+                    "delta": q.delta,
+                    "gamma": q.gamma,
+                    "theta": q.theta,
+                    "vega": q.vega,
+                    "evaluation_reason": reason,
+                    "blocking_reason": (
+                        reason if signal is None else
+                        "PASS" if eligible else "MIN_NET_EV_NOT_MET"
+                    ),
+                    "metrics": dict(metrics),
+                    "signal_ready": signal is not None,
+                    "eligible_for_execution": eligible,
+                    "probability": signal.probability if signal else metrics.get("probability"),
+                    "fair_value": signal.fair_value if signal else metrics.get("fair"),
+                    "expected_value": signal.expected_value if signal else metrics.get("expected_value"),
+                    "net_expected_value": signal.net_expected_value if signal else metrics.get("net_expected_value"),
+                    "score": signal.score if signal else None,
+                    "score_components": dict(signal.score_components) if signal else None,
+                    "checks": dict(signal.checks) if signal else None,
+                    "market_phase": signal.market_phase if signal else metrics.get("phase"),
+                    "direction_bias": signal.direction_bias if signal else metrics.get("direction"),
+                    "selected_for_execution": False,
+                })
                 audit.evaluated += 1
                 audit.reject(reason)
                 candidate_ev = float(metrics.get("net_expected_value", float("-inf")))
