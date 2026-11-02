@@ -147,6 +147,16 @@ class QuantEngine:
         return cls.black_scholes_price(state.spot, q.strike, vol, q.option_type, state.expiry or "")
 
     @staticmethod
+    def executable_entry_ev(probability: float, entry: float, stop: float,
+                            target: float, spread: float) -> tuple[float, float]:
+        """Estimate EV from the executable ask and the stop/target derived from it."""
+        win = max(0.0, target - entry)
+        loss = max(0.0, entry - stop)
+        ev = probability * win - (1.0 - probability) * loss
+        net_ev = ev - max(0.0, spread) * 0.5 - max(0.0, entry) * 0.002
+        return ev, net_ev
+
+    @staticmethod
     def _score_components(mispricing: float, probability: float, iv: float, rv: float,
                           oi_change: float, oi: float, volume: float, delta: float) -> dict[str, float]:
         valuation = max(0.0, min(25.0, 12.5 + 25.0 * mispricing))
@@ -409,13 +419,20 @@ class QuantEngine:
         if probability < 0.55:
             return None, "PROBABILITY_BELOW_55", {**metrics, "probability": probability, "fair": fair}
 
-        stop = max(q.ltp * 0.75, q.ltp - risk_per_share)
-        target = q.ltp + (q.ltp - stop) * target_multiple
-        win = max(0.0, target - q.ltp)
-        loss = max(0.0, q.ltp - stop)
-        ev = probability * win - (1 - probability) * loss
-        net_ev = ev - q.spread * 0.5 - q.ltp * 0.002
-        metrics.update({"probability": probability, "fair": fair, "expected_value": ev, "net_expected_value": net_ev})
+        entry = q.ask
+        stop = max(entry * 0.75, entry - risk_per_share)
+        target = entry + (entry - stop) * target_multiple
+        ev, net_ev = cls.executable_entry_ev(probability, entry, stop, target, q.spread)
+        metrics.update({
+            "probability": probability,
+            "fair": fair,
+            "entry_price_basis": "ASK",
+            "entry_price": entry,
+            "stop_price": stop,
+            "target_price": target,
+            "expected_value": ev,
+            "net_expected_value": net_ev,
+        })
 
         if net_ev < 0:
             return None, "NEGATIVE_NET_EV", metrics
