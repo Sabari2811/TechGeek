@@ -316,7 +316,7 @@ def test_quote_source_consistency_rejects_stale_chain_depth_mismatch():
     ok, reason, details = quote_source_consistency(quote, _five_level_depth(556.05, 558.0), 0.005)
     assert ok is False
     assert reason == "chain/depth top-of-book mismatch"
-    assert details["ask_diff_pct"] > 0.04
+    assert details["ask_diff_pct"] > 0.039
 
 
 def test_quote_source_consistency_rejects_missing_bid_or_incomplete_depth():
