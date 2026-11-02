@@ -32,6 +32,15 @@ def calculate_stop_target(entry_price: float, spot_price: float, reward_risk: fl
     return stop, target
 
 
+def cap_quantity_to_lots(raw_quantity: int, lot_size: int, max_lots: int) -> int:
+    """Round risk-sized quantity down to a valid lot, capped at max_lots."""
+    if any(not isinstance(value, int) or isinstance(value, bool) for value in (raw_quantity, lot_size, max_lots)):
+        raise ValueError("quantity, lot size, and lot cap must be integers")
+    if raw_quantity < 0 or lot_size <= 0 or max_lots <= 0:
+        raise ValueError("quantity must be non-negative; lot size and lot cap must be positive")
+    return min(raw_quantity // lot_size, max_lots) * lot_size
+
+
 class RiskManager:
     def __init__(self):
         self.state = RiskState()
