@@ -162,6 +162,8 @@ async def run():
                         "quote_age_seconds": p.quote_age_seconds,
                         "quote_freshness_basis": live_quote.get("freshness_basis", "unknown"),
                         "quote_stale": p.quote_stale,
+                        "exit_price_basis": ("BID" if p.quote_bid > 0 else "LTP_ESTIMATE"),
+                        "exit_price_executable": p.quote_bid > 0,
                     })
                 except Exception as exc:
                     # Never silently treat the old option-chain LTP as current.
@@ -174,9 +176,22 @@ async def run():
 
                 if not p.quote_stale:
                     live_ltp = p.current_price
+                    exit_price_basis = "BID" if p.quote_bid > 0 else "LTP_ESTIMATE"
                     exit_price = p.quote_bid if p.quote_bid > 0 else live_ltp
+                    if exit_price_basis == "LTP_ESTIMATE":
+                        record_audit_event("exit_price_estimated", {
+                            "security_id": p.signal.security_id,
+                            "symbol": p.signal.symbol,
+                            "opened_at": p.opened_at.isoformat(),
+                            "reason": "No positive bid in fresh quote; PAPER exit uses LTP estimate, not executable bid",
+                            "ltp": live_ltp,
+                            "bid": p.quote_bid,
+                            "ask": p.quote_ask,
+                            "quote_source": p.quote_source,
+                            "quote_age_seconds": p.quote_age_seconds,
+                        })
                     if live_ltp <= p.signal.stop:
-                        closed = await execution.exit(exit_price, "STOP LOSS")
+                        closed = await execution.exit(exit_price, "STOP LOSS", price_basis=exit_price_basis)
                         if closed is None:
                             Terminal.waiting(
                                 state.spot,
@@ -192,7 +207,7 @@ async def run():
                         await asyncio.sleep(1)
                         continue
                     if live_ltp >= p.signal.target:
-                        closed = await execution.exit(exit_price, "TARGET")
+                        closed = await execution.exit(exit_price, "TARGET", price_basis=exit_price_basis)
                         if closed is None:
                             Terminal.waiting(
                                 state.spot,
