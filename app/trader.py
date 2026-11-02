@@ -451,7 +451,7 @@ async def run():
                 continue
             signal.reason += f" | depth={micro_reason}"
 
-            lot_size = await client.contract_lot_size(expiry, signal.strike, signal.option_type)
+            lot_size = await client.contract_lot_size(expiry, signal.strike, signal.option_type, signal.security_id)
             if lot_size <= 0:
                 Terminal.waiting(state.spot, "Candidate rejected: lot size unavailable", checks)
                 await asyncio.sleep(CONFIG.poll_seconds)
