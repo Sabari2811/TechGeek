@@ -18,9 +18,9 @@ _SECRET_KEY_FRAGMENTS = (
     "token", "secret", "password", "authorization", "api_key", "apikey", "cookie",
 )
 _SECRET_VALUE_PATTERNS = (
-    (re.compile(r"(?i)\\bBearer\\s+[A-Za-z0-9._~+/=-]+"), "Bearer [REDACTED]"),
-    (re.compile(r"(?i)([?&](?:access_token|refresh_token|api_key|apikey|token|client_secret|password)=)[^&\\s]+"),
-     r"\\1[REDACTED]"),
+    (re.compile(r"(?i)\bBearer\s+[A-Za-z0-9._~+/=-]+"), "Bearer [REDACTED]"),
+    (re.compile(r"(?i)([?&](?:access_token|refresh_token|api_key|apikey|token|client_secret|password)=)[^&\s]+"),
+     r"\1[REDACTED]"),
 )
 
 
