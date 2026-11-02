@@ -32,3 +32,19 @@ def test_best_signal_records_every_evaluated_candidate():
     assert all(event["blocking_reason"] for event in audit.candidate_events)
     assert all(event["signal_ready"] is False for event in audit.candidate_events)
     assert all(event["option_quote_timestamp"] == observed_at.isoformat() for event in audit.candidate_events)
+
+
+
+def test_executable_entry_ev_uses_ask_based_stop_target_and_costs():
+    probability = 0.60
+    entry = 558.00
+    stop = 534.7041
+    target = 599.93262
+    spread = 1.95
+
+    ev, net_ev = QuantEngine.executable_entry_ev(probability, entry, stop, target, spread)
+
+    expected_ev = probability * (target - entry) - (1.0 - probability) * (entry - stop)
+    expected_net_ev = expected_ev - spread * 0.5 - entry * 0.002
+    assert ev == expected_ev
+    assert net_ev == expected_net_ev
