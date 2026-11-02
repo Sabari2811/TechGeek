@@ -201,6 +201,10 @@ def load_today_open_position(today: date | None = None) -> Position | None:
         return None
     except (OSError, json.JSONDecodeError, TypeError, ValueError) as exc:
         raise ValueError("Session state cannot be read; refusing startup with unknown position state") from exc
-    if not isinstance(payload, dict) or payload.get("date") != today.isoformat():
+    if not isinstance(payload, dict):
+        raise ValueError("Session state format is invalid; refusing startup with unknown position state")
+    if payload.get("date") != today.isoformat():
+        if payload.get("open_position") is not None:
+            raise ValueError("Prior-session PAPER position remains unresolved; manual review required")
         return None
     return _dict_to_position(payload.get("open_position"))
