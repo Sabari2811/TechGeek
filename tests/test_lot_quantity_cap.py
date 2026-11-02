@@ -31,14 +31,14 @@ from app.risk import daily_risk_check
 
 def test_daily_risk_guard_blocks_trade_that_exceeds_remaining_loss_budget():
     allowed, planned, remaining = daily_risk_check(468.30, 445.00515, 65, -18681.0, 20000.0)
-    assert planned == pytest.approx(1514.164)
+    assert planned == pytest.approx(1514.16525)
     assert remaining == pytest.approx(1319.0)
     assert allowed is False
 
 
 def test_daily_risk_guard_allows_trade_within_remaining_loss_budget():
     allowed, planned, remaining = daily_risk_check(468.30, 445.00515, 50, -10000.0, 20000.0)
-    assert planned == pytest.approx(1164.7575)
+    assert planned == pytest.approx(1164.7425)
     assert remaining == pytest.approx(10000.0)
     assert allowed is True
 
