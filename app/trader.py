@@ -10,7 +10,7 @@ from .microstructure import MicrostructureEngine, MicrostructureState
 from .risk import RiskManager, calculate_stop_target, cap_quantity_to_lots
 from .execution import ExecutionEngine
 from .learning import IncrementalLearner
-from .session_state import load_today, load_today_trades, save_today
+from .session_state import load_today, load_today_trades, save_today, load_open_position
 from .raw_data import record_option_chain, record_audit_event
 from .terminal import Terminal
 from .order_journal import enforce_startup_reconciliation, fetch_read_only_broker_reconciliation
@@ -78,6 +78,25 @@ async def run():
     learning = IncrementalLearner()
     execution = ExecutionEngine(client)
     execution.closed_trades = list(closed_trades)
+    try:
+        execution.position = load_open_position(datetime.now(IST).date())
+    except ValueError as exc:
+        from .kill_switch import set_enabled as set_kill_switch
+        set_kill_switch(True, f"open-position recovery failed: {exc}")
+        Terminal.waiting(reason=f"POSITION RECOVERY SAFETY HOLD — {exc}. No new entries allowed; inspect .quantnifty/open_position.json and broker state.")
+        await client.close()
+        return
+    if execution.position is not None:
+        record_audit_event("position_restored_after_restart", {
+            "symbol": execution.position.signal.symbol,
+            "security_id": execution.position.signal.security_id,
+            "quantity": execution.position.quantity,
+            "entry_price": execution.position.entry_price,
+            "stop_price": execution.position.signal.stop,
+            "target_price": execution.position.signal.target,
+            "opened_at": execution.position.opened_at.isoformat(),
+            "quote_required_before_exit": True,
+        })
     expiry = None
     risk_day = datetime.now(IST).date()
 
