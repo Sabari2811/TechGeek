@@ -196,7 +196,7 @@ class ExecutionEngine:
         })
         return self.position
 
-    async def exit(self, price: float, reason: str) -> Position | None:
+    async def exit(self, price: float, reason: str, price_basis: str = "UNSPECIFIED") -> Position | None:
         if not self.position:
             return None
         p = self.position
@@ -239,6 +239,8 @@ class ExecutionEngine:
             "stop_price": p.signal.stop,
             "target_price": p.signal.target,
             "mode": CONFIG.mode,
+            "price_basis": price_basis,
+            "pnl_quality": "ESTIMATED" if price_basis == "LTP_ESTIMATE" else ("BROKER_REPORTED" if CONFIG.live_enabled() else "PAPER_SIMULATED"),
         })
         if p.quantity > 0:
             return None
