@@ -583,6 +583,10 @@ class QuantEngine:
                         f"spread_pct={q.spread_pct}"
                     ),
                     "metrics": dict(metrics),
+                    "gate_results": {
+                        **dict(metrics.get("gate_results", {})),
+                        **({"min_net_ev": eligible} if signal is not None else {}),
+                    },
                     "signal_ready": signal is not None,
                     "eligible_for_execution": eligible,
                     "probability": signal.probability if signal else metrics.get("probability"),
