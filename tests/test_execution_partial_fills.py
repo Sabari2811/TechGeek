@@ -1,4 +1,5 @@
 import asyncio
+import json
 from datetime import datetime
 
 import pytest
@@ -64,9 +65,11 @@ def live_mode(monkeypatch, tmp_path):
     async def no_sleep(_seconds):
         return None
     monkeypatch.setattr("app.execution.asyncio.sleep", no_sleep)
+    return tmp_path
 
 
 def test_partial_exit_keeps_remaining_position_and_accumulates_fills(live_mode):
+    tmp_path = live_mode
     async def scenario():
         client = FakeClient([
             {"status": "PARTIALLY FILLED - CANCELLED", "traded_qty": 2, "traded_price": 190.0},
@@ -104,7 +107,19 @@ def test_partial_exit_keeps_remaining_position_and_accumulates_fills(live_mode):
         assert engine.closed_trades[0].quantity == 5
         assert engine.closed_trades[0].exit_price == pytest.approx(187.0)
         assert engine.closed_trades[0].pnl == pytest.approx(-65.0)
-        
+
+        audit_files = list((tmp_path / "audit").glob("*.jsonl"))
+        assert len(audit_files) == 1
+        events = [json.loads(line) for line in audit_files[0].read_text().splitlines()]
+        exits = [event["payload"] for event in events if event["event_type"] == "exit_fill"]
+        assert len(exits) == 2
+        assert exits[0]["gross_pnl_for_fill"] == pytest.approx(-20.0)
+        assert exits[1]["gross_pnl_for_fill"] == pytest.approx(-45.0)
+        assert exits[1]["cumulative_gross_pnl"] == pytest.approx(-65.0)
+        assert all(event["estimated_charges"] is None for event in exits)
+        assert all(event["net_pnl"] is None for event in exits)
+        assert all(event["charges_status"] == "NOT_ESTIMATED" for event in exits)
+
     asyncio.run(scenario())
 
 
