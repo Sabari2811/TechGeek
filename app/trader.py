@@ -14,6 +14,7 @@ from .session_state import load_today, load_today_trades, load_today_open_positi
 from .raw_data import record_option_chain, record_audit_event
 from .terminal import Terminal
 from .order_journal import enforce_startup_reconciliation, fetch_read_only_broker_reconciliation
+from .kill_switch import set_enabled as set_kill_switch
 
 
 async def next_expiry(client: IndstocksClient) -> str:
@@ -216,7 +217,7 @@ async def run():
                             continue
                         risk.record_trade(closed.realized_pnl)
                         learning.record(p.signal, closed.realized_pnl)
-                        save_today(state.spot_history, today, execution.closed_trades)
+                        save_today(state.spot_history, today, execution.closed_trades, None)
                         Terminal.set_trade_state(execution.position, execution.closed_trades, len(execution.closed_trades) + (1 if execution.position else 0))
                         Terminal.closed(closed, state.spot)
                         await asyncio.sleep(1)
