@@ -74,6 +74,27 @@ def test_contract_lot_size_requires_exact_identity_and_unique_match():
     asyncio.run(scenario())
 
 
+def test_contract_lot_size_must_match_selected_security_id():
+    payload = {"data": {"instruments": [
+        {"expiry": "2026-11-05", "strike": 22750, "option_type": "CE", "lot_size": 65, "security_id": "53792"},
+        {"expiry": "2026-11-05", "strike": 22750, "option_type": "CE", "lot_size": 75, "security_id": "99999"},
+    ]}}
+
+    async def scenario():
+        client = IndstocksClient()
+        client.http = FakeHttp(payload)
+        assert await client.contract_lot_size("2026-11-05", 22750, "CE", "53792") == 65
+        try:
+            await client.contract_lot_size("2026-11-05", 22750, "CE", "not-the-selected-id")
+        except RuntimeError as exc:
+            assert "matches=0" in str(exc)
+        else:
+            raise AssertionError("a different security ID must not pass lot-size lookup")
+        await client.close()
+
+    asyncio.run(scenario())
+
+
 def test_contract_lot_size_rejects_missing_identity_fields():
     payload = {"data": {"instruments": [{"lot_size": 65, "security_id": "111"}]}}
 
