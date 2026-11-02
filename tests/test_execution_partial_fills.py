@@ -58,6 +58,8 @@ def make_signal(quantity=5):
 def live_mode(monkeypatch, tmp_path):
     # Keep simulated broker events out of the real .quantnifty/orders journal.
     monkeypatch.setattr("app.order_journal.JOURNAL_ROOT", tmp_path / "orders")
+    # Keep simulated lifecycle events out of the real .quantnifty/audit journal.
+    monkeypatch.setattr("app.raw_data.AUDIT_ROOT", tmp_path / "audit")
     monkeypatch.setattr(type(CONFIG), "live_enabled", lambda self: True)
     async def no_sleep(_seconds):
         return None
