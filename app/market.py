@@ -179,7 +179,7 @@ class IndstocksClient:
         except Exception:
             return {}
 
-    async def contract_lot_size(self, expiry: str, strike: float, option_type: str) -> int:
+    async def contract_lot_size(self, expiry: str, strike: float, option_type: str, security_id: str | None = None) -> int:
         params = {"underlying":"NIFTY", "segment":"DERIVATIVE", "instrument_type":"OPTIDX",
                   "expiry":expiry, "option_type":option_type, "strike_from":strike, "strike_to":strike,
                   "page":1, "page_size":10}
@@ -193,7 +193,7 @@ class IndstocksClient:
 
         matches = [
             row for row in instruments
-            if isinstance(row, dict) and _instrument_matches(row, expiry, strike, option_type)
+            if isinstance(row, dict) and _instrument_matches(row, expiry, strike, option_type, security_id)
         ]
         if len(matches) != 1:
             raise RuntimeError(
@@ -589,7 +589,7 @@ def _first_value(row: dict, *names: str):
     return None
 
 
-def _instrument_matches(row: dict, expiry: str, strike: float, option_type: str) -> bool:
+def _instrument_matches(row: dict, expiry: str, strike: float, option_type: str, security_id: str | None = None) -> bool:
     """Require exact identity fields; missing identity is not a match."""
     row_expiry = _first_value(row, "expiry", "expiry_date", "expiryDate", "expiry_dt")
     row_strike = _first_value(row, "strike", "strike_price", "strikePrice", "strike_price_value")
@@ -607,7 +607,12 @@ def _instrument_matches(row: dict, expiry: str, strike: float, option_type: str)
         normalized_type = "CE"
     elif normalized_type in {"PUT", "P"}:
         normalized_type = "PE"
-    return (
-        _normalized_expiry(row_expiry) == _normalized_expiry(expiry)
-        and normalized_type == str(option_type).strip().upper()
-    )
+    if _normalized_expiry(row_expiry) != _normalized_expiry(expiry):
+        return False
+    if normalized_type != str(option_type).strip().upper():
+        return False
+    if security_id is not None:
+        row_security_id = _first_value(row, "security_id", "securityId", "instrument_id")
+        if row_security_id is None or str(row_security_id).strip() != str(security_id).strip():
+            return False
+    return True
