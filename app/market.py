@@ -506,7 +506,14 @@ def load_chain_into_state(state: MarketState, data: dict, timestamp: datetime | 
     spot = _num(data, "underlying_ltp")
     state.expiry = data.get("expiry")
     timestamp = timestamp or datetime.now(IST)
+    if timestamp.tzinfo is None:
+        timestamp = timestamp.replace(tzinfo=IST)
     state.set_spot(spot, timestamp)
+
+    # Each option-chain response is a complete snapshot for the returned
+    # strike window. Do not retain contracts omitted by the new window: doing
+    # so lets an old quote survive after its strike rolls out of the response.
+    state.options.clear()
     for strike_text, legs in data.get("strikes", {}).items():
         strike = float(strike_text)
         for option_type, raw in (("CE", legs.get("ce")), ("PE", legs.get("pe"))):
@@ -519,8 +526,51 @@ def load_chain_into_state(state: MarketState, data: dict, timestamp: datetime | 
                 _num(raw.get("greeks", {}) if isinstance(raw.get("greeks"), dict) else raw,"gamma"),
                 _num(raw.get("greeks", {}) if isinstance(raw.get("greeks"), dict) else raw,"theta"),
                 _num(raw.get("greeks", {}) if isinstance(raw.get("greeks"), dict) else raw,"vega"),
-                int(_num(raw,"lot_size")) if _num(raw,"lot_size") > 0 else 1)
+                int(_num(raw,"lot_size")) if _num(raw,"lot_size") > 0 else 1,
+                timestamp)
             state.options[state.key(strike, option_type)] = q
+
+
+def quote_source_consistency(q: OptionQuote, normalized_depth: dict,
+                             max_diff_pct: float = 0.005) -> tuple[bool, str, dict]:
+    """Require the chain top-of-book to agree with the selected contract's depth."""
+    details = {
+        "chain_bid": float(q.bid or 0.0),
+        "chain_ask": float(q.ask or 0.0),
+        "max_diff_pct": float(max_diff_pct),
+    }
+    if not isinstance(max_diff_pct, (int, float)) or not math.isfinite(max_diff_pct) or max_diff_pct <= 0:
+        return False, "invalid quote-source consistency tolerance", details
+
+    depth_root = normalized_depth.get("market_depth", {}) if isinstance(normalized_depth, dict) else {}
+    levels = depth_root.get("depth", []) if isinstance(depth_root, dict) else []
+    if not isinstance(levels, list) or len(levels) < 5:
+        details["depth_levels"] = len(levels) if isinstance(levels, list) else 0
+        return False, "five-level depth unavailable for quote comparison", details
+
+    best = levels[0] if isinstance(levels[0], dict) else {}
+    buy = best.get("buy", {}) if isinstance(best.get("buy"), dict) else {}
+    sell = best.get("sell", {}) if isinstance(best.get("sell"), dict) else {}
+    depth_bid = _num(buy, "price")
+    depth_ask = _num(sell, "price")
+    details.update({
+        "depth_bid": depth_bid,
+        "depth_ask": depth_ask,
+        "depth_levels": len(levels),
+    })
+
+    chain_bid, chain_ask = details["chain_bid"], details["chain_ask"]
+    if min(chain_bid, chain_ask, depth_bid, depth_ask) <= 0:
+        return False, "missing positive bid/ask in chain or depth quote", details
+    if chain_bid >= chain_ask or depth_bid >= depth_ask:
+        return False, "crossed or locked top-of-book", details
+
+    bid_diff_pct = abs(chain_bid - depth_bid) / max(chain_bid, depth_bid)
+    ask_diff_pct = abs(chain_ask - depth_ask) / max(chain_ask, depth_ask)
+    details.update({"bid_diff_pct": bid_diff_pct, "ask_diff_pct": ask_diff_pct})
+    if bid_diff_pct > max_diff_pct or ask_diff_pct > max_diff_pct:
+        return False, "chain/depth top-of-book mismatch", details
+    return True, "chain/depth top-of-book consistent", details
 
 
 
