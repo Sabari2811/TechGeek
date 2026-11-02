@@ -371,32 +371,56 @@ class QuantEngine:
         metrics = cls.phase_metrics(state)
         phase, direction, phase_confidence = cls.market_phase(state)
         metrics.update({"phase": phase, "direction": direction, "phase_confidence": phase_confidence})
+        gates: dict[str, bool] = {}
+
+        def reject(gate: str, reason: str, extra: dict | None = None):
+            gates[gate] = False
+            result = dict(metrics)
+            if extra:
+                result.update(extra)
+            result["gate_results"] = dict(gates)
+            result["blocking_reason"] = reason
+            return None, reason, result
+
+        def passed(gate: str):
+            gates[gate] = True
 
         if q.ltp <= 0:
-            return None, "INVALID_LTP", metrics
+            return reject("valid_ltp", "INVALID_LTP")
+        passed("valid_ltp")
+
         if q.bid <= 0 or q.ask <= 0:
-            return None, "INVALID_BID_ASK", metrics
+            return reject("valid_bid_ask", "INVALID_BID_ASK")
+        passed("valid_bid_ask")
+
         if q.spread_pct > CONFIG.max_spread_pct:
-            return None, "SPREAD_TOO_WIDE", metrics
+            return reject("spread_limit", "SPREAD_TOO_WIDE", {"spread_pct": q.spread_pct})
+        passed("spread_limit")
 
         # Hard market-regime gates run before fair value, probability and EV.
         # This makes the audit truthful: no mathematical edge is evaluated while
         # the market is still in accumulation or moving against the option side.
         if phase not in {"EARLY_CONFIRMATION", "BREAKOUT"}:
-            return None, "MARKET_PHASE_WAIT", metrics
+            return reject("market_phase", "MARKET_PHASE_WAIT")
+        passed("market_phase")
+
         aligned = "BULLISH" if q.option_type == "CE" else "BEARISH"
         if direction not in {"NEUTRAL", aligned}:
-            return None, "DIRECTION_MISMATCH", metrics
+            return reject("direction_alignment", "DIRECTION_MISMATCH", {"required_direction": aligned})
+        passed("direction_alignment")
 
         cls.ensure_greeks(state, q)
         fair = cls.fair_value_proxy(state, q)
         rv = cls.realized_vol(state.spot_history)
         iv = q.iv / 100.0 if q.iv > 1 else q.iv
         if iv <= 0:
-            return None, "IV_MISSING", metrics
+            return reject("iv_available", "IV_MISSING", {"fair": fair, "iv": iv})
+        passed("iv_available")
+
         vol = max(rv, iv, 0.05)
         if rv <= 0:
-            return None, "RV_INSUFFICIENT", metrics
+            return reject("realized_volatility", "RV_INSUFFICIENT", {"fair": fair, "iv": iv, "rv": rv})
+        passed("realized_volatility")
 
         now = datetime.now(IST)
         session_start = now.replace(hour=9, minute=30, second=0, microsecond=0)
@@ -417,7 +441,9 @@ class QuantEngine:
         if learner:
             probability = learner.probability(probability)
         if probability < 0.55:
-            return None, "PROBABILITY_BELOW_55", {**metrics, "probability": probability, "fair": fair}
+            return reject("probability_threshold", "PROBABILITY_BELOW_55",
+                          {"probability": probability, "fair": fair, "mispricing": mispricing})
+        passed("probability_threshold")
 
         entry = q.ask
         stop = max(entry * 0.75, entry - risk_per_share)
@@ -426,6 +452,7 @@ class QuantEngine:
         metrics.update({
             "probability": probability,
             "fair": fair,
+            "mispricing": mispricing,
             "entry_price_basis": "ASK",
             "entry_price": entry,
             "stop_price": stop,
@@ -433,9 +460,10 @@ class QuantEngine:
             "expected_value": ev,
             "net_expected_value": net_ev,
         })
-
         if net_ev < 0:
-            return None, "NEGATIVE_NET_EV", metrics
+            return reject("net_expected_value", "NEGATIVE_NET_EV")
+        passed("net_expected_value")
+        metrics["gate_results"] = dict(gates)
 
         components = cls._score_components(mispricing, probability, iv, rv, q.oi_change, q.oi, q.volume, q.delta)
         score = cls._score(components, learner)
