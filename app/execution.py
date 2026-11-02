@@ -8,6 +8,7 @@ from .market import IndstocksClient
 from .kill_switch import status as kill_switch_status, set_enabled as set_kill_switch
 from .raw_data import record_audit_event
 from .order_journal import record_order_event
+from .session_state import save_open_position, clear_open_position
 
 
 class ExecutionEngine:
@@ -181,6 +182,12 @@ class ExecutionEngine:
             opened_at=datetime.now(),
             current_price=entry,
         )
+        try:
+            save_open_position(self.position)
+        except Exception as exc:
+            set_kill_switch(True, "failed to persist open PAPER position")
+            record_audit_event("position_persistence_failed", {"stage": "entry", "symbol": signal.symbol, "security_id": signal.security_id, "error": str(exc)})
+            raise RuntimeError("Open position could not be durably persisted; entry kill switch enabled") from exc
         record_audit_event("entry_filled", {
             "symbol": signal.symbol,
             "security_id": signal.security_id,
@@ -243,10 +250,22 @@ class ExecutionEngine:
             "pnl_quality": "ESTIMATED" if price_basis == "LTP_ESTIMATE" else ("BROKER_REPORTED" if CONFIG.live_enabled() else "PAPER_SIMULATED"),
         })
         if p.quantity > 0:
+            try:
+                save_open_position(p)
+            except Exception as exc:
+                set_kill_switch(True, "failed to persist partially open position")
+                record_audit_event("position_persistence_failed", {"stage": "partial_exit", "symbol": p.signal.symbol, "security_id": p.signal.security_id, "remaining_quantity": p.quantity, "error": str(exc)})
+                raise RuntimeError("Remaining position could not be durably persisted; entry kill switch enabled") from exc
             return None
 
         p.exit_price = p.exit_proceeds / p.exit_filled_quantity
         closed = p
         self.closed_trades.append(TradeRecord.from_position(closed))
         self.position = None
+        try:
+            clear_open_position()
+        except Exception as exc:
+            set_kill_switch(True, "failed to clear closed PAPER position state")
+            record_audit_event("position_persistence_failed", {"stage": "close", "symbol": p.signal.symbol, "security_id": p.signal.security_id, "error": str(exc)})
+            raise RuntimeError("Closed position state could not be cleared; entry kill switch enabled") from exc
         return closed
