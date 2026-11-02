@@ -31,6 +31,7 @@ def test_best_signal_records_every_evaluated_candidate():
     assert {event["security_id"] for event in audit.candidate_events} == {"1001", "1002"}
     assert all(event["blocking_reason"] for event in audit.candidate_events)
     assert all(event["signal_ready"] is False for event in audit.candidate_events)
+    assert all(event["gate_results"]["valid_ltp"] is False for event in audit.candidate_events)
     assert all(event["option_quote_timestamp"] == observed_at.isoformat() for event in audit.candidate_events)
 
 
