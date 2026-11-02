@@ -7,7 +7,7 @@ from .models import MarketState, SignalAudit
 from .market import IndstocksClient, load_chain_into_state, extract_market_depth, summarize_market_depth_payload
 from .math_engine import QuantEngine
 from .microstructure import MicrostructureEngine, MicrostructureState
-from .risk import RiskManager, calculate_stop_target, cap_quantity_to_lots
+from .risk import RiskManager, calculate_stop_target, cap_quantity_to_lots, daily_risk_check
 from .execution import ExecutionEngine
 from .learning import IncrementalLearner
 from .session_state import load_today, load_today_trades, save_today
@@ -295,6 +295,7 @@ async def run():
             if not q or q.ask <= 0 or q.spread_pct > CONFIG.max_spread_pct:
                 checks = dict(signal.checks)
                 checks["Liquidity / spread"] = False
+                record_audit_event("candidate_blocked", {"symbol": signal.symbol, "security_id": signal.security_id, "stage": "execution_quality", "reason": "missing option quote or invalid ask or spread above configured maximum", "ltp": q.ltp if q else None, "bid": q.bid if q else None, "ask": q.ask if q else None, "spread_pct": q.spread_pct if q else None, "max_spread_pct": CONFIG.max_spread_pct, "checks": checks})
                 Terminal.waiting(state.spot, "Candidate rejected by execution-quality guard.", checks)
                 await asyncio.sleep(CONFIG.poll_seconds)
                 continue
@@ -342,6 +343,7 @@ async def run():
             signal.checks = checks
 
             if not confirmed:
+                record_audit_event("candidate_blocked", {"symbol": signal.symbol, "security_id": q.security_id, "stage": "microstructure", "reason": micro_reason, "provider_payload": depth_data, "normalized_depth": raw_depth, "depth_diagnostic": depth_diag, "checks": checks})
                 reason_text = f"Candidate rejected — {micro_reason} (security_id={q.security_id})"
                 if micro_reason == "microstructure unavailable" and depth_diag:
                     reason_text += f" | {depth_diag}"
@@ -367,7 +369,17 @@ async def run():
             raw_qty = risk.size(signal)
             qty = cap_quantity_to_lots(raw_qty, lot_size, CONFIG.max_lots_per_trade)
             if qty <= 0:
+                record_audit_event("candidate_blocked", {"symbol": signal.symbol, "security_id": signal.security_id, "stage": "quantity", "reason": "risk-sized quantity is below one contract lot", "raw_quantity": raw_qty, "lot_size": lot_size, "max_lots": CONFIG.max_lots_per_trade, "checks": checks})
                 Terminal.waiting(state.spot, "Candidate rejected: position size is below one lot", checks)
+                await asyncio.sleep(CONFIG.poll_seconds)
+                continue
+
+            risk_allowed, planned_risk, remaining_risk = daily_risk_check(
+                signal.entry, signal.stop, qty, risk.state.realized_pnl, CONFIG.max_daily_loss
+            )
+            if not risk_allowed:
+                record_audit_event("candidate_blocked", {"symbol": signal.symbol, "security_id": signal.security_id, "stage": "daily_remaining_risk", "reason": "planned stop risk exceeds remaining daily loss allowance", "planned_stop_risk": planned_risk, "remaining_daily_loss_budget": remaining_risk, "realized_pnl": risk.state.realized_pnl, "max_daily_loss": CONFIG.max_daily_loss, "quantity": qty, "entry": signal.entry, "stop": signal.stop, "checks": checks})
+                Terminal.waiting(state.spot, f"Candidate rejected: planned stop risk ₹{planned_risk:.2f} exceeds remaining daily loss budget ₹{remaining_risk:.2f}.", checks)
                 await asyncio.sleep(CONFIG.poll_seconds)
                 continue
 
