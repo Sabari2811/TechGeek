@@ -212,3 +212,10 @@
 
 - Read-only broker reconciliation now continues to report the order book and derivative intraday positions if an individual per-order fill lookup fails.
 - Failed fill lookups are listed under `trade_fetch_errors`, `reconciliation_complete` is false, and `manual_review_required` is true. This is diagnostic only and never clears unresolved journal records or the kill switch.
+
+
+## One-lot sizing cap — 2026-11-02
+
+- Added `MAX_LOTS_PER_TRADE` with a default of `1`. QuantNifty now rounds the risk-approved quantity down to a valid contract lot and caps it at one lot by default.
+- If the risk budget cannot support a full lot, the candidate is skipped; the cap never forces a larger risk size. Contract lot-size lookup, five-level microstructure confirmation, daily limits, duplicate protection, kill switch, and reconciliation are unchanged.
+- No live order routing was enabled. No local app restart or runtime validation was performed by the repository change itself; verify CI and restart locally in PAPER mode after reviewing broker state.
