@@ -545,6 +545,15 @@ class QuantEngine:
                         reason if signal is None else
                         "PASS" if eligible else "MIN_NET_EV_NOT_MET"
                     ),
+                    "explanation": (
+                        f"{q.symbol or f'{q.strike:g}{q.option_type}'}: "
+                        f"{reason if signal is None else ('eligible' if eligible else 'net EV below minimum')}; "
+                        f"phase={metrics.get('phase', 'UNKNOWN')}, "
+                        f"direction={metrics.get('direction', 'NEUTRAL')}, "
+                        f"probability={signal.probability if signal else metrics.get('probability')}, "
+                        f"netEV={signal.net_expected_value if signal else metrics.get('net_expected_value')}, "
+                        f"spread_pct={q.spread_pct}"
+                    ),
                     "metrics": dict(metrics),
                     "signal_ready": signal is not None,
                     "eligible_for_execution": eligible,
