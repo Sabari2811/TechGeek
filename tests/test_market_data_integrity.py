@@ -1,7 +1,11 @@
 import asyncio
 from types import SimpleNamespace
 
-from app.market import IndstocksClient, _extract_live_quote
+from datetime import datetime
+from zoneinfo import ZoneInfo
+
+from app.market import IndstocksClient, _extract_live_quote, load_chain_into_state, quote_source_consistency
+from app.models import MarketState, OptionQuote
 
 
 class FakeResponse:
@@ -230,3 +234,105 @@ def test_order_trades_rejects_non_positive_fill_values():
         await client.close()
 
     asyncio.run(scenario())
+
+
+
+def test_load_chain_replaces_old_option_window_and_timestamps_quotes():
+    state = MarketState()
+    ist = ZoneInfo("Asia/Kolkata")
+    first_time = datetime(2026, 11, 2, 9, 30, tzinfo=ist)
+    second_time = datetime(2026, 11, 2, 9, 31, tzinfo=ist)
+    first = {
+        "underlying_ltp": 23274.0,
+        "expiry": "2026-11-03",
+        "strikes": {
+            "23800": {
+                "pe": {
+                    "security_id": "54103", "trading_symbol": "NIFTY-23800-PE",
+                    "last_price": 530.65, "top_bid_price": 528.90, "top_ask_price": 531.00,
+                    "volume": 1000, "oi": 5000, "previous_oi": 4900, "iv": 18.36,
+                    "lot_size": 65,
+                }
+            }
+        },
+    }
+    second = {
+        "underlying_ltp": 23259.5,
+        "expiry": "2026-11-03",
+        "strikes": {
+            "23750": {
+                "pe": {
+                    "security_id": "54101", "trading_symbol": "NIFTY-23750-PE",
+                    "last_price": 465.10, "top_bid_price": 466.70, "top_ask_price": 468.30,
+                    "volume": 2000, "oi": 6000, "previous_oi": 5900, "iv": 12.04,
+                    "lot_size": 65,
+                }
+            }
+        },
+    }
+
+    load_chain_into_state(state, first, first_time)
+    old_quote = state.get_option(23800, "PE")
+    assert old_quote is not None
+    assert old_quote.observed_at == first_time
+
+    load_chain_into_state(state, second, second_time)
+    assert state.get_option(23800, "PE") is None
+    new_quote = state.get_option(23750, "PE")
+    assert new_quote is not None
+    assert new_quote.observed_at == second_time
+
+
+def _five_level_depth(bid, ask):
+    return {
+        "market_depth": {
+            "depth": [
+                {"buy": {"price": str(bid), "quantity": "65"},
+                 "sell": {"price": str(ask), "quantity": "65"}}
+                for _ in range(5)
+            ]
+        }
+    }
+
+
+def test_quote_source_consistency_accepts_matching_chain_and_depth():
+    quote = OptionQuote(
+        22800, "CE", "53794", "NIFTY-22800-CE",
+        518.6, 518.0, 518.9, 100000, 200000, 199000, 19.4,
+    )
+    ok, reason, details = quote_source_consistency(quote, _five_level_depth(518.0, 518.9), 0.005)
+    assert ok is True
+    assert reason == "chain/depth top-of-book consistent"
+    assert details["depth_levels"] == 5
+    assert details["bid_diff_pct"] == 0
+    assert details["ask_diff_pct"] == 0
+
+
+def test_quote_source_consistency_rejects_stale_chain_depth_mismatch():
+    quote = OptionQuote(
+        22750, "CE", "53792", "NIFTY-22750-CE",
+        530.0, 534.0, 535.75, 166660, 480740, 480748, 21.91,
+    )
+    ok, reason, details = quote_source_consistency(quote, _five_level_depth(556.05, 558.0), 0.005)
+    assert ok is False
+    assert reason == "chain/depth top-of-book mismatch"
+    assert details["ask_diff_pct"] > 0.04
+
+
+def test_quote_source_consistency_rejects_missing_bid_or_incomplete_depth():
+    quote = OptionQuote(
+        23750, "PE", "54101", "NIFTY-23750-PE",
+        465.1, 0.0, 468.3, 49205, 18265, 17975, 12.04,
+    )
+    ok, reason, _ = quote_source_consistency(quote, _five_level_depth(466.7, 468.3), 0.005)
+    assert ok is False
+    assert reason == "missing positive bid/ask in chain or depth quote"
+
+    short_depth = {"market_depth": {"depth": _five_level_depth(466.7, 468.3)["market_depth"]["depth"][:4]}}
+    ok, reason, _ = quote_source_consistency(
+        OptionQuote(23750, "PE", "54101", "NIFTY-23750-PE", 465.1, 466.7, 468.3, 1, 1, 1, 12.04),
+        short_depth,
+        0.005,
+    )
+    assert ok is False
+    assert reason == "five-level depth unavailable for quote comparison"
