@@ -5,6 +5,7 @@ Secrets are never written. Files live under .quantnifty/ and are ignored by git.
 """
 import json
 import math
+import re
 from datetime import datetime
 from pathlib import Path
 from .config import IST
@@ -13,13 +14,35 @@ RAW_ROOT = Path(".quantnifty/raw")
 AUDIT_ROOT = Path(".quantnifty/audit")
 
 
+_SECRET_KEY_FRAGMENTS = (
+    "token", "secret", "password", "authorization", "api_key", "apikey", "cookie",
+)
+_SECRET_VALUE_PATTERNS = (
+    (re.compile(r"(?i)\\bBearer\\s+[A-Za-z0-9._~+/=-]+"), "Bearer [REDACTED]"),
+    (re.compile(r"(?i)([?&](?:access_token|refresh_token|api_key|apikey|token|client_secret|password)=)[^&\\s]+"),
+     r"\\1[REDACTED]"),
+)
+
+
 def _json_safe(value):
     if isinstance(value, float):
         return value if math.isfinite(value) else None
     if isinstance(value, dict):
-        return {str(k): _json_safe(v) for k, v in value.items()}
+        safe = {}
+        for key, item in value.items():
+            key_text = str(key)
+            if any(fragment in key_text.lower() for fragment in _SECRET_KEY_FRAGMENTS):
+                safe[key_text] = "[REDACTED]"
+            else:
+                safe[key_text] = _json_safe(item)
+        return safe
     if isinstance(value, list):
         return [_json_safe(v) for v in value]
+    if isinstance(value, str):
+        safe_text = value
+        for pattern, replacement in _SECRET_VALUE_PATTERNS:
+            safe_text = pattern.sub(replacement, safe_text)
+        return safe_text
     return value
 
 
