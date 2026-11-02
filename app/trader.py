@@ -7,7 +7,7 @@ from .models import MarketState, SignalAudit
 from .market import IndstocksClient, load_chain_into_state, extract_market_depth, summarize_market_depth_payload
 from .math_engine import QuantEngine
 from .microstructure import MicrostructureEngine, MicrostructureState
-from .risk import RiskManager, calculate_stop_target
+from .risk import RiskManager, calculate_stop_target, cap_quantity_to_lots
 from .execution import ExecutionEngine
 from .learning import IncrementalLearner
 from .session_state import load_today, load_today_trades, save_today
@@ -350,7 +350,7 @@ async def run():
                 continue
 
             raw_qty = risk.size(signal)
-            qty = (raw_qty // lot_size) * lot_size
+            qty = cap_quantity_to_lots(raw_qty, lot_size, CONFIG.max_lots_per_trade)
             if qty <= 0:
                 Terminal.waiting(state.spot, "Candidate rejected: position size is below one lot", checks)
                 await asyncio.sleep(CONFIG.poll_seconds)
