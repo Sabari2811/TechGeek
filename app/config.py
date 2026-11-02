@@ -17,6 +17,7 @@ class Config:
     risk_per_trade: float = float(os.getenv("RISK_PER_TRADE", "0.005"))
     max_daily_loss: float = float(os.getenv("MAX_DAILY_LOSS", "20000"))
     max_trades: int = int(os.getenv("MAX_TRADES", "3"))
+    max_lots_per_trade: int = int(os.getenv("MAX_LOTS_PER_TRADE", "1"))
     min_net_ev: float = float(os.getenv("MIN_NET_EV", "10"))
     max_spread_pct: float = float(os.getenv("MAX_SPREAD_PCT", "0.04"))
     stale_seconds: float = float(os.getenv("STALE_SECONDS", "3"))
