@@ -92,6 +92,7 @@ def build_daily_report(day: date, include_raw: bool = True) -> dict:
         "microstructure_evidence": [_redact(e) for e in micro],
         "warnings": warnings,
         "raw_audit_events": raw_events,
+        "raw_option_chain_snapshots": _redact(chain_records) if include_raw else None,
         "raw_data_manifest": {
             "option_chain_snapshot_count": len(chain_records),
             "option_chain_timestamps": [r.get("timestamp") for r in chain_records],
