@@ -12,6 +12,7 @@ from .execution import ExecutionEngine
 from .learning import IncrementalLearner
 from .session_state import load_today, load_today_trades, save_today
 from .raw_data import record_option_chain, record_audit_event
+from .daily_reports import write_daily_report
 from .terminal import Terminal
 from .order_journal import enforce_startup_reconciliation, fetch_read_only_broker_reconciliation
 
@@ -80,6 +81,7 @@ async def run():
     execution.closed_trades = list(closed_trades)
     expiry = None
     risk_day = datetime.now(IST).date()
+    reported_day = None
 
     try:
         while True:
@@ -100,6 +102,18 @@ async def run():
 
             Terminal.set_trade_state(execution.position, execution.closed_trades, len(execution.closed_trades) + (1 if execution.position else 0))
             if not CONFIG.session_active():
+                if datetime.now(IST).time() > CONFIG.end_time and reported_day != today:
+                    try:
+                        report = write_daily_report(today)
+                        summary = report["summary"]
+                        print(
+                            f"DAILY REPORT SAVED: .quantnifty/reports/{today.isoformat()}/daily_report.json "
+                            f"| closed_trades={summary['closed_session_ledger_trades']} "
+                            f"| recorded_pnl=₹{summary['recorded_session_ledger_pnl']:,.2f}"
+                        )
+                        reported_day = today
+                    except Exception as exc:
+                        print(f"DAILY REPORT GENERATION FAILED: {type(exc).__name__}: {exc}")
                 Terminal.waiting(state.spot, "Outside market session. Run during 09:30–15:15 IST.")
                 await asyncio.sleep(30)
                 continue
