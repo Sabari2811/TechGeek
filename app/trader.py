@@ -10,11 +10,12 @@ from .microstructure import MicrostructureEngine, MicrostructureState
 from .risk import RiskManager, calculate_stop_target, cap_quantity_to_lots
 from .execution import ExecutionEngine
 from .learning import IncrementalLearner
-from .session_state import load_today, load_today_trades, save_today
+from .session_state import load_today, load_today_trades, load_today_open_position, save_today
 from .raw_data import record_option_chain, record_audit_event
 from .daily_reports import write_daily_report
 from .terminal import Terminal
 from .order_journal import enforce_startup_reconciliation, fetch_read_only_broker_reconciliation
+from .kill_switch import set_enabled as set_kill_switch
 
 
 async def next_expiry(client: IndstocksClient) -> str:
@@ -64,9 +65,14 @@ async def run():
     client = IndstocksClient()
     state = MarketState()
     closed_trades = load_today_trades(datetime.now(IST).date())
-    # Restore only today's spot observations. Options, positions and secrets are
-    # intentionally never persisted, so a restart cannot resurrect stale orders.
+    # Restore bounded spot history and a PAPER position. Recovered quotes are stale.
     state.spot_history = load_today(datetime.now(IST).date())
+    try:
+        recovered_position = load_today_open_position(datetime.now(IST).date()) if CONFIG.mode == "PAPER" else None
+    except ValueError as exc:
+        set_kill_switch(True, f"session position recovery failed: {exc}")
+        Terminal.waiting(reason=f"STARTUP SAFETY HOLD — {exc}")
+        return
     if state.spot_history:
         state.spot = state.spot_history[-1]
     micro_state = MicrostructureState()
@@ -79,6 +85,16 @@ async def run():
     learning = IncrementalLearner()
     execution = ExecutionEngine(client)
     execution.closed_trades = list(closed_trades)
+    if recovered_position is not None:
+        execution.position = recovered_position
+        record_audit_event("paper_position_recovered", {
+            "security_id": recovered_position.signal.security_id,
+            "symbol": recovered_position.signal.symbol,
+            "quantity": recovered_position.quantity,
+            "entry_price": recovered_position.entry_price,
+            "opened_at": recovered_position.opened_at.isoformat(),
+            "reason": "Recovered persisted PAPER position; fresh quote required before exit evaluation",
+        })
     expiry = None
     risk_day = datetime.now(IST).date()
     reported_day = None
@@ -124,7 +140,7 @@ async def run():
                 chain = await client.option_chain(expiry)
                 record_option_chain(chain, expiry=expiry)
                 load_chain_into_state(state, chain)
-                save_today(state.spot_history, today, execution.closed_trades)
+                save_today(state.spot_history, today, execution.closed_trades, None)
             except Exception as exc:
                 Terminal.waiting(state.spot, f"Data feed warning: {exc}")
                 await asyncio.sleep(CONFIG.poll_seconds)
@@ -215,7 +231,7 @@ async def run():
                             continue
                         risk.record_trade(closed.realized_pnl)
                         learning.record(p.signal, closed.realized_pnl)
-                        save_today(state.spot_history, today, execution.closed_trades)
+                        save_today(state.spot_history, today, execution.closed_trades, None)
                         Terminal.set_trade_state(execution.position, execution.closed_trades, len(execution.closed_trades) + (1 if execution.position else 0))
                         Terminal.closed(closed, state.spot)
                         await asyncio.sleep(1)
@@ -407,6 +423,7 @@ async def run():
 
             try:
                 p = await execution.enter(signal, qty)
+                save_today(state.spot_history, today, execution.closed_trades, p)
                 Terminal.set_trade_state(execution.position, execution.closed_trades, len(execution.closed_trades) + (1 if execution.position else 0))
                 Terminal.active(p, state.spot)
             except Exception as exc:
