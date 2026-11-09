@@ -17,3 +17,23 @@ def test_raw_option_chain_round_trip(tmp_path, monkeypatch):
     assert len(rows) == 1
     assert rows[0]["data"]["underlying_ltp"] == 23300
     assert "Authorization" not in rows[0]
+
+
+
+def test_raw_market_and_audit_payloads_redact_credentials_and_tokens():
+    from app.raw_data import _json_safe
+
+    safe = _json_safe({
+        "Authorization": "Bearer top-secret-token",
+        "nested": {
+            "access_token": "private-token",
+            "security_id": "53792",
+            "url": "https://example.test/chain?token=abc123&expiry=2026-11-03",
+        },
+    })
+
+    assert safe["Authorization"] == "[REDACTED]"
+    assert safe["nested"]["access_token"] == "[REDACTED]"
+    assert safe["nested"]["security_id"] == "53792"
+    assert "abc123" not in safe["nested"]["url"]
+    assert "token=[REDACTED]" in safe["nested"]["url"]

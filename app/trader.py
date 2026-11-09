@@ -4,7 +4,7 @@ import math
 from datetime import datetime
 from .config import CONFIG, IST
 from .models import MarketState, SignalAudit
-from .market import IndstocksClient, load_chain_into_state, extract_market_depth, summarize_market_depth_payload
+from .market import IndstocksClient, load_chain_into_state, extract_market_depth, summarize_market_depth_payload, quote_source_consistency
 from .math_engine import QuantEngine
 from .microstructure import MicrostructureEngine, MicrostructureState
 from .risk import RiskManager, calculate_stop_target, cap_quantity_to_lots
@@ -286,6 +286,28 @@ async def run():
 
             audit = SignalAudit()
             signal = QuantEngine.best_signal(state, CONFIG.min_net_ev, learner=learning, audit=audit)
+            for candidate in audit.candidate_events:
+                candidate["selected_for_execution"] = bool(
+                    signal
+                    and candidate.get("security_id") == signal.security_id
+                    and candidate.get("symbol") == signal.symbol
+                )
+            record_audit_event("candidate_evaluations", {
+                "timestamp_ist": datetime.now(IST).isoformat(),
+                "spot": state.spot,
+                "futures": state.futures if state.futures > 0 else None,
+                "vix": state.vix if state.vix > 0 else None,
+                "expiry": state.expiry,
+                "market_phase": audit.phase,
+                "direction": audit.phase_direction,
+                "phase_confidence": audit.phase_confidence,
+                "directional_efficiency": audit.directional_efficiency,
+                "risk_budget": CONFIG.risk_capital * CONFIG.risk_per_trade,
+                "max_daily_loss": CONFIG.max_daily_loss,
+                "max_trades": CONFIG.max_trades,
+                "candidate_count": len(audit.candidate_events),
+                "candidates": audit.candidate_events,
+            })
             if not signal:
                 record_audit_event("signal_rejected", {
                     "spot": state.spot,
@@ -306,9 +328,41 @@ async def run():
                 continue
 
             q = state.get_option(signal.strike, signal.option_type)
-            if not q or q.ask <= 0 or q.spread_pct > CONFIG.max_spread_pct:
+            quote_timestamp = q.observed_at if q else None
+            if quote_timestamp is not None and quote_timestamp.tzinfo is None:
+                quote_timestamp = quote_timestamp.replace(tzinfo=IST)
+            quote_age_seconds = (
+                max(0.0, (datetime.now(IST) - quote_timestamp).total_seconds())
+                if quote_timestamp is not None else None
+            )
+            if not q or quote_age_seconds is None or quote_age_seconds > CONFIG.stale_seconds:
+                record_audit_event("candidate_blocked", {
+                    "symbol": signal.symbol,
+                    "security_id": signal.security_id,
+                    "stage": "option_quote_freshness",
+                    "reason": "option-chain quote missing or older than configured freshness limit",
+                    "quote_timestamp": quote_timestamp.isoformat() if quote_timestamp else None,
+                    "quote_age_seconds": quote_age_seconds,
+                    "stale_seconds": CONFIG.stale_seconds,
+                })
+                Terminal.waiting(state.spot, "Candidate rejected: option quote is missing or stale.")
+                await asyncio.sleep(CONFIG.poll_seconds)
+                continue
+            if q.ask <= 0 or q.spread_pct > CONFIG.max_spread_pct:
                 checks = dict(signal.checks)
                 checks["Liquidity / spread"] = False
+                record_audit_event("candidate_blocked", {
+                    "symbol": signal.symbol,
+                    "security_id": signal.security_id,
+                    "stage": "execution_quality",
+                    "reason": "invalid ask or spread above configured maximum",
+                    "ltp": q.ltp,
+                    "bid": q.bid,
+                    "ask": q.ask,
+                    "spread_pct": q.spread_pct,
+                    "max_spread_pct": CONFIG.max_spread_pct,
+                    "checks": checks,
+                })
                 Terminal.waiting(state.spot, "Candidate rejected by execution-quality guard.", checks)
                 await asyncio.sleep(CONFIG.poll_seconds)
                 continue
@@ -332,6 +386,9 @@ async def run():
             except Exception as exc:
                 confirmed, micro_reason = False, f"depth feed unavailable: {exc}"
 
+            quote_consistent, quote_consistency_reason, quote_consistency_details = quote_source_consistency(
+                q, raw_depth, CONFIG.max_quote_source_diff_pct
+            )
             record_audit_event("microstructure_check", {
                 "security_id": q.security_id,
                 "strike": q.strike,
@@ -341,6 +398,18 @@ async def run():
                 "confirmed": confirmed,
                 "reason": micro_reason,
                 "depth_diagnostic": depth_diag,
+                "quote_source_consistent": quote_consistent,
+                "quote_source_reason": quote_consistency_reason,
+                "quote_source_details": quote_consistency_details,
+            })
+            record_audit_event("quote_source_consistency", {
+                "security_id": q.security_id,
+                "symbol": q.symbol,
+                "quote_timestamp": quote_timestamp.isoformat(),
+                "quote_age_seconds": quote_age_seconds,
+                "reason": quote_consistency_reason,
+                "consistent": quote_consistent,
+                "details": quote_consistency_details,
             })
             audit.microstructure_evaluated += 1
             audit.microstructure_last_reason = micro_reason
@@ -351,6 +420,8 @@ async def run():
 
             checks = dict(signal.checks)
             checks["Liquidity / spread"] = q.spread_pct <= CONFIG.max_spread_pct
+            checks["Option quote freshness"] = quote_age_seconds <= CONFIG.stale_seconds
+            checks["Quote source consistency"] = quote_consistent
             checks["Microstructure confirmation"] = confirmed
             checks["Risk / session"] = True
             signal.checks = checks
@@ -359,7 +430,29 @@ async def run():
                 reason_text = f"Candidate rejected — {micro_reason} (security_id={q.security_id})"
                 if micro_reason == "microstructure unavailable" and depth_diag:
                     reason_text += f" | {depth_diag}"
+                record_audit_event("candidate_blocked", {
+                    "symbol": signal.symbol,
+                    "security_id": q.security_id,
+                    "stage": "microstructure",
+                    "reason": micro_reason,
+                    "provider_payload": depth_data,
+                    "normalized_depth": raw_depth,
+                    "checks": checks,
+                })
                 Terminal.waiting(state.spot, reason_text, checks)
+                await asyncio.sleep(CONFIG.poll_seconds)
+                continue
+
+            if not quote_consistent:
+                record_audit_event("candidate_blocked", {
+                    "symbol": signal.symbol,
+                    "security_id": q.security_id,
+                    "stage": "quote_source_consistency",
+                    "reason": quote_consistency_reason,
+                    "details": quote_consistency_details,
+                    "checks": checks,
+                })
+                Terminal.waiting(state.spot, f"Candidate rejected: {quote_consistency_reason}.", checks)
                 await asyncio.sleep(CONFIG.poll_seconds)
                 continue
 
@@ -372,7 +465,7 @@ async def run():
                 continue
             signal.reason += f" | depth={micro_reason}"
 
-            lot_size = await client.contract_lot_size(expiry, signal.strike, signal.option_type)
+            lot_size = await client.contract_lot_size(expiry, signal.strike, signal.option_type, signal.security_id)
             if lot_size <= 0:
                 Terminal.waiting(state.spot, "Candidate rejected: lot size unavailable", checks)
                 await asyncio.sleep(CONFIG.poll_seconds)
@@ -392,16 +485,37 @@ async def run():
                 "strike": signal.strike,
                 "expiry": expiry,
                 "spot": state.spot,
+                "futures": state.futures if state.futures > 0 else None,
+                "vix": state.vix if state.vix > 0 else None,
+                "option_quote_timestamp": quote_timestamp.isoformat(),
+                "option_quote_age_seconds": quote_age_seconds,
+                "option_ltp": q.ltp,
+                "option_bid": q.bid,
+                "option_ask": q.ask,
+                "spread": q.spread,
+                "spread_pct": q.spread_pct,
                 "entry_price": signal.entry,
                 "stop_price": signal.stop,
                 "target_price": signal.target,
+                "raw_quantity": raw_qty,
                 "quantity": qty,
                 "lot_size": lot_size,
+                "max_lots_per_trade": CONFIG.max_lots_per_trade,
+                "risk_budget": CONFIG.risk_capital * CONFIG.risk_per_trade,
                 "probability": signal.probability,
+                "fair_value": signal.fair_value,
                 "expected_value": signal.expected_value,
                 "net_expected_value": signal.net_expected_value,
+                "score": signal.score,
+                "score_components": signal.score_components,
+                "checks": checks,
+                "market_phase": signal.market_phase,
+                "direction_bias": signal.direction_bias,
+                "signal_reason": signal.reason,
                 "microstructure_confirmed": confirmed,
                 "microstructure_reason": micro_reason,
+                "quote_source_consistent": quote_consistent,
+                "quote_source_details": quote_consistency_details,
                 "depth_levels": len(raw_depth.get("market_depth", {}).get("depth", [])),
             })
 
