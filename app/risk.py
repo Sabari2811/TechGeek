@@ -41,6 +41,18 @@ def cap_quantity_to_lots(raw_quantity: int, lot_size: int, max_lots: int) -> int
     return min(raw_quantity // lot_size, max_lots) * lot_size
 
 
+def daily_risk_check(entry, stop, quantity, realized_pnl, max_daily_loss):
+    """Check planned stop loss against remaining daily loss allowance."""
+    values = (entry, stop, realized_pnl, max_daily_loss)
+    if not all(isinstance(v, (int, float)) and math.isfinite(v) for v in values):
+        raise ValueError("risk inputs must be finite numbers")
+    if entry <= 0 or stop <= 0 or stop >= entry or quantity <= 0 or max_daily_loss <= 0:
+        raise ValueError("invalid entry, stop, quantity, or daily loss limit")
+    planned_risk = (entry - stop) * quantity
+    remaining_budget = max(0.0, max_daily_loss + realized_pnl)
+    return planned_risk <= remaining_budget, planned_risk, remaining_budget
+
+
 class RiskManager:
     def __init__(self):
         self.state = RiskState()
