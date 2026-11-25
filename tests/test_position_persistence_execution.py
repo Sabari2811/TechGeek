@@ -79,3 +79,21 @@ def test_paper_entry_persistence_failure_trips_kill_switch(tmp_path, monkeypatch
     assert enabled is True
     assert "persist" in reason.lower()
     assert engine.position is not None
+
+
+
+def test_non_paper_mode_does_not_write_paper_position_state(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    setup_isolated_state(monkeypatch, tmp_path)
+    monkeypatch.setattr(
+        execution_module,
+        "CONFIG",
+        SimpleNamespace(mode="LIVE", live_enabled=lambda: False),
+    )
+    engine = ExecutionEngine(NoBrokerOrders())
+
+    position = asyncio.run(engine.enter(make_signal(), 65))
+
+    assert position is not None
+    assert not (tmp_path / "open_position.json").exists()
