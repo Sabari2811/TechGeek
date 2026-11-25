@@ -15,6 +15,8 @@ def test_paper_entry_never_calls_broker_order(monkeypatch, tmp_path):
     monkeypatch.setattr(kill_switch, "KILL_SWITCH_PATH", tmp_path / "kill_switch.json")
     import app.session_state as session_state
     monkeypatch.setattr(session_state, "OPEN_POSITION_PATH", tmp_path / "open_position.json")
+    import app.execution as execution_module
+    monkeypatch.setattr(execution_module, "record_audit_event", lambda *args, **kwargs: None)
     monkeypatch.setenv("ENABLE_LIVE_TRADING", "NO")
     calls = []
 
