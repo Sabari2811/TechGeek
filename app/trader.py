@@ -27,6 +27,7 @@ async def next_expiry(client: IndstocksClient) -> str:
 
 
 async def run():
+    Terminal.set_safety_hold(False)
     # Resolve any order intent left unfinished by a prior process before the
     # application can consider new entries. Never infer broker flatness.
     unresolved_orders = enforce_startup_reconciliation()
