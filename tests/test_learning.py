@@ -71,3 +71,43 @@ def test_multiple_old_outcomes_are_processed_and_persisted(tmp_path):
     assert restored.summary()["wins"] == 1
     assert restored.summary()["losses"] == 2
     assert restored.summary()["pending"] == 0
+
+
+def test_outcome_recording_is_idempotent_across_restarts(tmp_path):
+    path = tmp_path / "state.json"
+    learner = IncrementalLearner(str(path))
+    trade_id = "SEC123:2026-11-25T10:00:00+05:30"
+
+    assert learner.record(signal(), 125.0, outcome_id=trade_id) is True
+    assert learner.record(signal(), 125.0, outcome_id=trade_id) is False
+    assert learner.summary()["pending"] == 1
+
+    restored = IncrementalLearner(str(path))
+    assert restored.record(signal(), 125.0, outcome_id=trade_id) is False
+    assert restored.summary()["pending"] == 1
+
+
+def test_future_dated_outcomes_are_not_learned_early(tmp_path):
+    learner = IncrementalLearner(str(tmp_path / "state.json"))
+    today = datetime.now(IST).date()
+    learner.record(signal(), 100.0, outcome_id="future-test")
+    learner.state.pending[-1]["date"] = (today + timedelta(days=1)).isoformat()
+    learner._save()
+
+    assert learner.learn_if_new_day(today.isoformat()) is False
+    assert learner.summary()["outcomes"] == 0
+    assert learner.summary()["pending"] == 1
+
+    assert learner.learn_if_new_day((today + timedelta(days=2)).isoformat()) is True
+    assert learner.summary()["outcomes"] == 1
+    assert learner.summary()["pending"] == 0
+
+
+def test_invalid_learning_date_is_rejected(tmp_path):
+    learner = IncrementalLearner(str(tmp_path / "state.json"))
+    try:
+        learner.learn_if_new_day("not-a-date")
+    except ValueError as exc:
+        assert "ISO date" in str(exc)
+    else:
+        raise AssertionError("invalid learning date must be rejected")
