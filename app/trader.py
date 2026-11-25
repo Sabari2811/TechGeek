@@ -27,10 +27,17 @@ async def next_expiry(client: IndstocksClient) -> str:
 
 
 async def run():
+    Terminal.set_safety_hold(False)
     # Resolve any order intent left unfinished by a prior process before the
     # application can consider new entries. Never infer broker flatness.
     unresolved_orders = enforce_startup_reconciliation()
-    if unresolved_orders:
+    monitor_only = bool(unresolved_orders)
+    if monitor_only:
+        hold_reason = (
+            f"STARTUP SAFETY HOLD — {len(unresolved_orders)} unresolved journal item(s). "
+            "Market analysis is read-only; all order execution is disabled."
+        )
+        Terminal.set_safety_hold(True, hold_reason)
         report_summary = "Broker snapshot not attempted (access token missing)."
         if CONFIG.access_token:
             reconciliation_client = IndstocksClient()
@@ -50,16 +57,22 @@ async def run():
                 await reconciliation_client.close()
         Terminal.waiting(
             reason=(
-                f"STARTUP SAFETY HOLD — {len(unresolved_orders)} unresolved journal item(s). "
-                f"{report_summary} No orders were submitted; position/journal state was not changed. "
-                "Verify broker orders, fills and positions, then explicitly clear the kill switch."
+                f"{hold_reason} {report_summary} No orders were submitted; "
+                "position/journal state was not changed."
             )
         )
-        return
 
     if not CONFIG.access_token:
-        Terminal.waiting(reason="INDSTOCKS_ACCESS_TOKEN is missing. Configure .env first.")
-        return
+        # Keep the terminal alive even when market data cannot be requested.
+        # This loop is display-only and never changes order or position state.
+        while True:
+            Terminal.waiting(
+                reason=(
+                    "MONITOR ONLY — INDSTOCKS_ACCESS_TOKEN is missing. "
+                    "Configure the local .env file to resume read-only market monitoring."
+                )
+            )
+            await asyncio.sleep(CONFIG.poll_seconds)
 
     client = IndstocksClient()
     state = MarketState()
@@ -115,7 +128,7 @@ async def run():
                     except Exception as exc:
                         print(f"DAILY REPORT GENERATION FAILED: {type(exc).__name__}: {exc}")
                 Terminal.waiting(state.spot, "Outside market session. Run during 09:30–15:15 IST.")
-                await asyncio.sleep(30)
+                await asyncio.sleep(CONFIG.poll_seconds if monitor_only else 30)
                 continue
 
             try:
@@ -397,7 +410,9 @@ async def run():
                 await asyncio.sleep(CONFIG.poll_seconds)
                 continue
 
-            record_audit_event("signal_accepted_for_execution", {
+            record_audit_event(
+                "signal_accepted_for_monitoring" if monitor_only else "signal_accepted_for_execution",
+                {
                 "security_id": signal.security_id,
                 "symbol": signal.symbol,
                 "option_type": signal.option_type,
@@ -416,6 +431,21 @@ async def run():
                 "microstructure_reason": micro_reason,
                 "depth_levels": len(raw_depth.get("market_depth", {}).get("depth", [])),
             })
+
+            if monitor_only:
+                # Continue ranking candidates during a startup hold, but never
+                # pass a candidate to the execution engine.
+                Terminal.waiting(
+                    state.spot,
+                    (
+                        f"MONITOR ONLY — candidate {signal.symbol} | "
+                        f"entry ₹{signal.entry:.2f} | netEV ₹{signal.net_expected_value:.2f} | "
+                        f"probability {signal.probability:.1%}. Order execution is disabled."
+                    ),
+                    checks,
+                )
+                await asyncio.sleep(CONFIG.poll_seconds)
+                continue
 
             try:
                 p = await execution.enter(signal, qty)

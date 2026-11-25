@@ -20,6 +20,11 @@ class Terminal:
     _active_trade = None
     _closed_trades = []
     _total_trades = 0
+    _safety_hold_reason = ""
+
+    @staticmethod
+    def set_safety_hold(enabled: bool, reason: str = ""):
+        Terminal._safety_hold_reason = reason if enabled else ""
 
     @staticmethod
     def set_trade_state(active, closed, total_trades):
@@ -69,6 +74,9 @@ class Terminal:
         print("╔══════════════════════════════════════════════════════╗")
         print(f"║              {Terminal._paint(f'QUANTNIFTY | {mode:<12}', BOLD + CYAN)}             ║")
         print("╠══════════════════════════════════════════════════════╣")
+        if Terminal._safety_hold_reason:
+            print(f"║ {Terminal._paint('MONITOR ONLY — ORDER EXECUTION DISABLED', YELLOW)}")
+            print(f"║ {Terminal._safety_hold_reason[:54]}")
         kill_enabled, kill_reason = kill_switch_status()
         switch_label = "ON — NEW ENTRIES BLOCKED" if kill_enabled else "OFF"
         switch_color = RED if kill_enabled else GREEN
