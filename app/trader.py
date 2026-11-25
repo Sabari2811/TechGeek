@@ -49,11 +49,12 @@ async def run():
         )
         Terminal.set_safety_hold(True, hold_reason)
     if monitor_only:
-        hold_reason = (
-            f"STARTUP SAFETY HOLD — {len(unresolved_orders)} unresolved journal item(s). "
-            "Market analysis is read-only; all order execution is disabled."
-        )
-        Terminal.set_safety_hold(True, hold_reason)
+        if unresolved_orders:
+            hold_reason = (
+                f"STARTUP SAFETY HOLD — {len(unresolved_orders)} unresolved journal item(s). "
+                "Market analysis is read-only; all order execution is disabled."
+            )
+            Terminal.set_safety_hold(True, hold_reason)
         report_summary = "Broker snapshot not attempted (access token missing)."
         if CONFIG.access_token:
             reconciliation_client = IndstocksClient()
