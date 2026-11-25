@@ -70,6 +70,8 @@ def test_daily_report_summarizes_candidate_and_quote_source_audits(tmp_path, mon
     raw.mkdir()
     monkeypatch.setattr(daily_reports, "AUDIT_ROOT", audit)
     monkeypatch.setattr(daily_reports, "RAW_ROOT", raw)
+    monkeypatch.setattr(raw_data, "AUDIT_ROOT", audit)
+    monkeypatch.setattr(raw_data, "RAW_ROOT", raw)
     monkeypatch.setattr(session_state, "STATE_PATH", tmp_path / "session_state.json")
 
     timestamp = datetime(2026, 11, 25, 10, 0, tzinfo=ZoneInfo("Asia/Kolkata"))
