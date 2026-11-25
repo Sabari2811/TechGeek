@@ -21,6 +21,7 @@ class OptionQuote:
     theta: float = 0.0
     vega: float = 0.0
     lot_size: int = 1
+    observed_at: Optional[datetime] = None
 
     @property
     def oi_change(self) -> float:
@@ -99,6 +100,7 @@ class SignalAudit:
     microstructure_passed: int = 0
     microstructure_rejected: int = 0
     microstructure_last_reason: str = ""
+    candidate_events: list[dict] = field(default_factory=list)
 
     def reject(self, reason: str) -> None:
         self.rejected[reason] = self.rejected.get(reason, 0) + 1
