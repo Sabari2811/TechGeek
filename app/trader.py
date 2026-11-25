@@ -15,6 +15,7 @@ from .raw_data import record_option_chain, record_audit_event
 from .daily_reports import write_daily_report
 from .terminal import Terminal
 from .order_journal import enforce_startup_reconciliation, fetch_read_only_broker_reconciliation
+from .kill_switch import status as kill_switch_status
 
 
 async def next_expiry(client: IndstocksClient) -> str:
@@ -32,6 +33,21 @@ async def run():
     # application can consider new entries. Never infer broker flatness.
     unresolved_orders = enforce_startup_reconciliation()
     monitor_only = bool(unresolved_orders)
+    # Persistence failures can leave the last durable file missing or stale.
+    # Keep those specific states in manual-review monitor-only mode on restart.
+    switch_enabled, switch_reason = kill_switch_status()
+    persistence_recovery_failure = switch_enabled and (
+        "failed to persist open PAPER position" in switch_reason
+        or "failed to persist partially open PAPER position" in switch_reason
+        or "failed to clear closed PAPER position state" in switch_reason
+    )
+    if persistence_recovery_failure:
+        monitor_only = True
+        hold_reason = (
+            "PAPER POSITION PERSISTENCE SAFETY HOLD — "
+            f"{switch_reason}. Verify the position and local state manually; no orders will be submitted."
+        )
+        Terminal.set_safety_hold(True, hold_reason)
     if monitor_only:
         hold_reason = (
             f"STARTUP SAFETY HOLD — {len(unresolved_orders)} unresolved journal item(s). "
