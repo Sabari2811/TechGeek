@@ -219,3 +219,16 @@
 - Added `MAX_LOTS_PER_TRADE` with a default of `1`. QuantNifty now rounds the risk-approved quantity down to a valid contract lot and caps it at one lot by default.
 - If the risk budget cannot support a full lot, the candidate is skipped; the cap never forces a larger risk size. Contract lot-size lookup, five-level microstructure confirmation, daily limits, duplicate protection, kill switch, and reconciliation are unchanged.
 - No live order routing was enabled. No local app restart or runtime validation was performed by the repository change itself; verify CI and restart locally in PAPER mode after reviewing broker state.
+
+## Startup monitor-only safety hold — 2026-11-25
+
+- PR #28 adds a persistent monitor-only loop when startup detects unresolved order-journal entries.
+- The app keeps polling read-only market data at `CONFIG.poll_seconds` during market hours, evaluates the mathematical strategy, and displays candidate details without calling `ExecutionEngine.enter`.
+- Outside market hours, the monitor-only terminal refreshes at the configured polling interval rather than exiting or waiting 30 seconds.
+- The terminal displays `MONITOR ONLY — ORDER EXECUTION DISABLED` and the startup safety-hold reason on each refresh.
+- The startup broker reconciliation remains read-only and runs once. No order submit/cancel/modify, journal reconciliation, position mutation, or kill-switch clearing is performed by monitor-only mode.
+- Candidates found in this mode are audited as `signal_accepted_for_monitoring`, not `signal_accepted_for_execution`.
+- Added `tests/test_terminal_safety_hold.py` to verify the persistent safety banner.
+- GitHub Actions run 45610128536 passed on Python 3.11, 3.12, and 3.14 for head `99ec5018a39b49669fa86192f35fc4ef5b79581c`.
+- PR #28 is open and ready for review; it has not been merged. Local Windows runtime validation is still required.
+- Keep the kill switch ON until the 10 unresolved journal records are independently verified and manually reconciled. PAPER-only; live routing remains disabled.
