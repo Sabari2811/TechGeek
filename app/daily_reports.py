@@ -96,6 +96,8 @@ def build_daily_report(day: date, include_raw: bool = True) -> dict:
         "summary": {
             "closed_session_ledger_trades": len(trades),
             "recorded_entry_fill_positions": len(fills),
+            "accepted_execution_candidates": sum(1 for e in accepted if e.get("event_type") == "signal_accepted_for_execution"),
+            "signal_rejection_cycles": sum(1 for e in rejected if e.get("event_type") == "signal_rejected"),
             "accepted_execution_or_monitoring_candidates": len(accepted),
             "signal_rejection_and_candidate_block_events": len(rejected),
             "candidate_evaluation_batches": len(candidate_evaluations),
