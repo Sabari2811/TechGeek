@@ -20,6 +20,7 @@ class Config:
     max_lots_per_trade: int = int(os.getenv("MAX_LOTS_PER_TRADE", "1"))
     min_net_ev: float = float(os.getenv("MIN_NET_EV", "10"))
     max_spread_pct: float = float(os.getenv("MAX_SPREAD_PCT", "0.04"))
+    max_quote_source_diff_pct: float = float(os.getenv("MAX_QUOTE_SOURCE_DIFF_PCT", "0.005"))
     stale_seconds: float = float(os.getenv("STALE_SECONDS", "3"))
     strike_count: int = int(os.getenv("STRIKE_COUNT", "10"))
     poll_seconds: float = float(os.getenv("POLL_SECONDS", "2"))
