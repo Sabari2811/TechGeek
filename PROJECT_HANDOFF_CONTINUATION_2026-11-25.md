@@ -1,10 +1,10 @@
 # QuantNifty — Complete Project Handoff
 
-**Prepared:** 2026-11-25  
+**Prepared:** 2026-11-25 (updated after PR #30 and #31 merges)  
 **Repository:** https://github.com/Sabari2811/TechGeek  
 **Default/integration branch:** `main`  
-**Verified main commit at handoff preparation:** `6ae8431210c5c4ec495b5e07bca85aecec907d5e`  
-**Latest merged PR:** #28 — Keep QuantNifty monitoring during startup safety hold
+**Latest verified main commit:** `b99739b66a6c271e071b80fe94fb7dbf4ea40738`  
+**Latest merged PR:** #31 — Enforce quote freshness and complete candidate audit
 
 > This file is the continuation brief for a fresh ChatGPT conversation. Read this file first, then refresh GitHub state before editing anything. The repository is the source of truth; this handoff records the state observed on 2026-11-25 and may become stale after new commits.
 
@@ -44,13 +44,19 @@ During the repository review on 2026-11-25, the current `.env.example` on `main`
 
 ## 3. Current repository state
 
+**Authoritative update — 2026-11-25 12:56 UTC:** PR #30 (PAPER position persistence/recovery) and PR #31 (quote freshness/candidate audit) are merged to main. PR #23, #24 and #25 are closed as superseded. There are currently no open PRs. PR #31 CI passed on Python 3.11, 3.12 and 3.14 (run [45618417820](https://github.com/Sabari2811/TechGeek/actions/runs/45618417820)); main-branch CI for commit b99739b66a6c271e071b80fe94fb7dbf4ea40738 was still running when this update was written (run [45618535657](https://github.com/Sabari2811/TechGeek/actions/runs/45618535657)).
+
+PR #30 stores PAPER open positions separately in .quantnifty/open_position.json, restores only today's validated PAPER position with a stale quote, persists lifecycle changes, and holds startup for specified persistence failures. PR #31 adds local option-chain receive timestamps, stale quote rejection, exact security-ID contract matching, five-level chain/depth consistency, ask-based EV, candidate evaluation audit events, per-fill gross P&L metadata, and token redaction. Existing daily remaining-loss checks, PR #28 monitor-only mode, kill switch, order journal, five-level microstructure requirement, and live-routing guard were preserved.
+
+Remaining limitations: Windows-local restart validation, inspection of actual local open-position/order-journal state before reconciliation, forensic review of the 2026-11-02 trade, provider exchange-event timestamp verification, backtesting/learning improvements, and rotation of the credential previously exposed in Git history. The current .env.example contains a harmless placeholder, but the old value remains in Git history until rotation/history cleanup is handled.
+
 - Main branch: `main`
 - Main commit: `6ae8431210c5c4ec495b5e07bca85aecec907d5e`
 - Latest main commit message: `Keep QuantNifty monitoring during startup safety hold`
 - Latest main commit date: 2026-11-25 12:04:56 UTC
 - Latest merged PR: [#28](https://github.com/Sabari2811/TechGeek/pull/28)
 - Latest main CI run inspected: [45610362317](https://github.com/Sabari2811/TechGeek/actions/runs/45610362317) — Python 3.11, 3.12 and 3.14 all passed.
-- At the time of review: 22 PRs merged, 3 open PRs (#23, #24, #25), and 3 closed as superseded/unmerged (#4, #12, #14).
+- At the latest update: 25 PRs merged, no open PRs, and 6 closed as superseded/unmerged (#4, #12, #14, #23, #24, #25).
 - The open branches were each 16 commits behind main at the time of the compare check; refresh before action.
 
 Repository links:
@@ -127,7 +133,7 @@ The configured `entries_allowed()` requires start time reached, before the new-e
 
 ## 6. Pull-request history
 
-### Merged PRs (22)
+### Merged PRs (25)
 
 | PR | Summary |
 |---|---|
@@ -153,16 +159,22 @@ The configured `entries_allowed()` requires start time reached, before the new-e
 | [#26](https://github.com/Sabari2811/TechGeek/pull/26) | Automatic local daily trade intelligence reports |
 | [#27](https://github.com/Sabari2811/TechGeek/pull/27) | Isolate audit output in simulated execution tests |
 | [#28](https://github.com/Sabari2811/TechGeek/pull/28) | Persistent monitor-only market analysis during startup safety hold |
+| [#29](https://github.com/Sabari2811/TechGeek/pull/29) | Complete continuation handoff and sample environment placeholder cleanup |
+| [#30](https://github.com/Sabari2811/TechGeek/pull/30) | Separate PAPER open-position persistence and safe restart recovery |
+| [#31](https://github.com/Sabari2811/TechGeek/pull/31) | Quote freshness, source consistency, ask-based EV and candidate audit |
 
-### Closed as superseded/unmerged (3)
+### Closed as superseded/unmerged (6)
 
 - [#4](https://github.com/Sabari2811/TechGeek/pull/4): superseded by #7, which ported market-data fixes onto a newer main.
 - [#12](https://github.com/Sabari2811/TechGeek/pull/12): duplicate/superseded by #13 quote-latency guard.
 - [#14](https://github.com/Sabari2811/TechGeek/pull/14): duplicate/superseded by #15 fill reconciliation.
+- [#23](https://github.com/Sabari2811/TechGeek/pull/23): superseded by merged #31, which ported quote freshness/audit onto current main.
+- [#24](https://github.com/Sabari2811/TechGeek/pull/24): superseded by merged #30, which ported PAPER position recovery onto current main.
+- [#25](https://github.com/Sabari2811/TechGeek/pull/25): alternative persistence design superseded by #30; do not merge.
 
 Do not reimplement these superseded PRs as separate features.
 
-## 7. Open PRs and review findings (state observed 2026-11-25)
+## 7. Historical PR review (the old open-PR snapshot below is superseded by the authoritative status in section 3)
 
 ### PR #23 — Block stale option quotes and audit every evaluated candidate
 
@@ -268,60 +280,50 @@ Review finding:
 - Execution replay uses captured position quote events and is diagnostic only.
 - Recorded fill reconciliation uses recorded fills, not quote triggers, for recorded gross P&L.
 
-## 9. Known limitations and pending work
+## 9. Current pending work (after PR #30 and #31)
 
-### P0 — Must resolve before considering reliable PAPER restart operation
+### P0 — Operator validation and account safety
 
-1. Integrate and validate durable open PAPER position recovery (preferred basis: PR #24).
-2. Verify startup behaviour with an open persisted position, corrupt file, stale recovered quote, partial exit and full closure.
-3. Verify the kill switch and unresolved order journal remain fail-closed after restart.
-4. Independently inspect local broker orders, trades and positions before any manual reconciliation. The previous handoff recorded 10 unresolved journal records; this count is a historical note, **not a freshly verified current count**. Recheck local files and broker state before relying on it.
-5. Keep live order routing disabled.
+1. Windows-local PAPER restart validation: run the application in PAPER mode with isolated temporary state. Verify entry persistence, restart restoration, stale-quote requirement, exit, full-close cleanup, corrupt-state hold and kill-switch behaviour. Never use live order routing.
+2. Inspect actual local state before reconciliation: open-position file, kill switch, order journal, raw/audit logs and session ledger. If unresolved journal records or an open position exist, inspect broker orders, trades and positions through the existing read-only tools. Do not infer flatness or auto-mark journal events reconciled.
+3. Credential rotation: the JWT-shaped INDstocks value was removed from the current .env.example and replaced with a placeholder in PR #29. The old credential remains in Git history. The account owner must revoke/rotate it through INDstocks and then decide whether to clean repository history. Do not print or reuse the old value.
 
-### P1 — Market-data integrity and forensic audit
+### P1 — Forensic and market-data integrity
 
-6. Integrate PR #23 after position-recovery integration; resolve all conflicts and review the complete combined diff.
-7. Ensure every evaluated candidate has auditable data and explicit rejection/acceptance stage.
-8. Ensure option-chain and depth quotes refer to the same exact contract and source values are consistent.
-9. Preserve clear freshness semantics: local receive timestamp, REST round-trip latency and provider exchange-event timestamp are different things. Provider event timestamp remains unresolved unless official docs/schema prove otherwise.
-10. Ensure stale/missing quote paths cannot create false entry or exit decisions.
+4. Investigate the 2026-11-02 trade(s), including the reported unmatched 22750 CE entry / stop execution concern, using local audit, raw chain, order journal, session ledger and read-only broker evidence. No actual trade outcome is established by the repository alone.
+5. Provider event-time semantics: PR #31 uses local option-chain receive timestamps. Existing REST full-quote latency is round-trip latency, not exchange-event time. Verify official provider timestamp fields/schema before claiming true exchange-event freshness; do not invent a provider timestamp.
+6. Inspect candidate_evaluations, quote_source_consistency, candidate_blocked, entry_filled and exit_fill records after a PAPER session. Check real quote consistency and audit volume.
 
-### P2 — Research quality and operational improvements
+### P2 — Research and operations
 
-11. Investigate the 2026-11-02 trade(s), including the reported unmatched 22750 CE entry / stop execution concern, using local audit, raw chain, order journal, session ledger and broker evidence. Do not assume a trade or fill from incomplete data.
-12. Improve deterministic execution backtesting with historical bid/ask/depth, slippage, fees, latency and partial-fill assumptions. Clearly label assumptions and simulated results.
-13. Validate learner outcome idempotency and chronological walk-forward calibration with no look-ahead leakage.
-14. Improve operational health beyond process liveness: trader task health, feed freshness, last successful quote and safety-hold status.
-15. Validate Windows-local PAPER startup/restart and deployment only after safe offline tests pass.
-16. Update this handoff after every meaningful change.
+7. Build a deterministic execution backtester using historical bid/ask/depth, slippage, fees, latency and partial-fill assumptions. Clearly label assumptions and simulated results.
+8. Validate learner outcome idempotency and chronological walk-forward calibration with no look-ahead leakage.
+9. Improve operational health beyond process liveness: trader task health, feed freshness, last successful quote, audit write health, persistence health and safety-hold status.
+10. Review future daily reports for consistency between recorded broker fills, simulated PAPER fills and estimated exits.
+11. Update this handoff after every meaningful change.
 
-### Security
-17. Replace the JWT-shaped value found in `.env.example` with a placeholder and have the owner revoke/rotate the exposed INDstocks credential. Assess Git history cleanup after rotation. Never reproduce the value in commits, PRs, logs or handoff files.
+## 10. Recommended next-session workflow
 
-## 10. Recommended integration order
+1. Refresh main commit, open PR list and latest CI before doing any work.
+2. Read this handoff and the chronological PROJECT_HANDOFF.md.
+3. Start with Windows-local PAPER restart validation using isolated temporary state; do not use the user's actual .quantnifty state in tests.
+4. Ask the user for the 2026-11-02 local raw/audit/order-journal/session files needed for forensic review, or use connected local files if available. Treat broker evidence as separate and read-only.
+5. Have the user rotate the exposed INDstocks credential. Do not attempt credential rotation or broker account actions without explicit user control.
+6. Research provider timestamp documentation before changing freshness semantics.
+7. Only then proceed to backtesting, learner validation and operational-health improvements.
+8. Keep all live order routing disabled and preserve daily loss, microstructure, kill-switch and order-journal gates.
 
-1. Refresh main and all PR heads/statuses; confirm no one has updated the branches since this handoff.
-2. Create a new integration branch from current `main`; do not force-push or blindly merge stale PR branches.
-3. Port/rebase PR #24 position-persistence changes first. Resolve conflicts against current main.
-4. Review all persistence call sites and add lifecycle tests: entry -> restart -> fresh quote -> partial exit -> restart -> full exit -> clear; corrupt state; previous-day state; write failure; duplicate/repeated saves.
-5. Run compile and full pytest suite locally/offline, then push and require Python 3.11/3.12/3.14 CI.
-6. Once #24 is stable, port PR #23 onto that integrated branch. Resolve conflicts and verify quote freshness, source consistency, candidate audit, EV basis and interaction with persisted positions.
-7. Run the full test matrix again. Review the integrated diff for any weakening of five-level gate, risk limits, kill switch, order journal or live-routing guard.
-8. Close PR #25 as superseded only after the preferred implementation is merged or otherwise safely integrated.
-9. Create/update PRs with clear evidence and update `PROJECT_HANDOFF.md` and this continuation handoff.
-10. Keep the app PAPER-only. No live orders, no live token use in tests and no automatic broker reconciliation.
-
-## 11. Definition of done for today's pending PR work
+## 11. Definition of done for remaining work
 
 Do not call the pending PR work complete merely because CI is green. Completion requires:
 
-- Both feature sets (#24 position recovery and #23 quote freshness/audit) integrated without losing existing main functionality.
-- Tests for the full lifecycle and relevant failure cases.
-- Python 3.11, 3.12 and 3.14 CI green on the final integrated head.
-- Full diff reviewed for safety invariants.
-- No secrets in current tracked files; exposed token rotated by account owner.
-- #25 closed as superseded after #24 is established.
-- Updated handoff reflects exact final commits, PR status, CI run IDs and remaining limitations.
+- PAPER position recovery (#30) and quote freshness/candidate audit (#31) are merged to main.
+- PR #30 and #31 CI matrices passed Python 3.11, 3.12 and 3.14.
+- Current main commit's post-merge CI must be checked before the next engineering merge.
+- Windows-local restart validation and actual local/broker-state inspection remain outstanding.
+- Exposed INDstocks credential still requires account-owner rotation; .env.example is currently a placeholder.
+- The 2026-11-02 trade forensic review needs local logs and broker evidence.
+- Provider exchange-event timestamp semantics remain unverified.
 - No real-money execution enabled or performed.
 
 Some work may be achievable today, but broker-account verification, credential rotation, Windows-local validation and any provider documentation/account actions require the user. Do not claim those are done without evidence.
