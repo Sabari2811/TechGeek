@@ -1,10 +1,10 @@
 # QuantNifty — Complete Project Handoff
 
-**Prepared:** 2026-11-25 (updated after PR #30 and #31 merges)  
+**Prepared:** 2026-11-25 (updated after PR #30–#33 merges)  
 **Repository:** https://github.com/Sabari2811/TechGeek  
 **Default/integration branch:** `main`  
-**Latest verified main commit:** `b99739b66a6c271e071b80fe94fb7dbf4ea40738`  
-**Latest merged PR:** #31 — Enforce quote freshness and complete candidate audit
+**Latest verified main commit:** `f9d55270358122463810ca3af5301b904a7b9a5c`  
+**Latest merged PR:** #33 — Include candidate and quote integrity audits in daily reports
 
 > This file is the continuation brief for a fresh ChatGPT conversation. Read this file first, then refresh GitHub state before editing anything. The repository is the source of truth; this handoff records the state observed on 2026-11-25 and may become stale after new commits.
 
@@ -44,7 +44,7 @@ During the repository review on 2026-11-25, the current `.env.example` on `main`
 
 ## 3. Current repository state
 
-**Authoritative update — 2026-11-25 12:56 UTC:** PR #30 (PAPER position persistence/recovery) and PR #31 (quote freshness/candidate audit) are merged to main. PR #23, #24 and #25 are closed as superseded. There are currently no open PRs. PR #31 CI passed on Python 3.11, 3.12 and 3.14 (run [45618417820](https://github.com/Sabari2811/TechGeek/actions/runs/45618417820)); main-branch CI for commit b99739b66a6c271e071b80fe94fb7dbf4ea40738 was still running when this update was written (run [45618535657](https://github.com/Sabari2811/TechGeek/actions/runs/45618535657)).
+**Authoritative update — 2026-11-25 12:56 UTC:** PR #30 (PAPER position persistence/recovery), PR #31 (quote freshness/candidate audit), PR #32 (learner idempotency/chronological outcomes), and PR #33 (daily report coverage for candidate and quote audits) are merged to main. PR #23, #24 and #25 are closed as superseded. There are currently no open PRs. PR #31 CI passed on Python 3.11, 3.12 and 3.14 (run [45618417820](https://github.com/Sabari2811/TechGeek/actions/runs/45618417820)); PR #32 CI passed on all three versions (run [45618984970](https://github.com/Sabari2811/TechGeek/actions/runs/45618984970)); PR #33 CI passed on all three versions (run [45619450707](https://github.com/Sabari2811/TechGeek/actions/runs/45619450707)). Main-branch CI for the latest commit f9d55270358122463810ca3af5301b904a7b9a5c was queued when this update was written (run [45619574701](https://github.com/Sabari2811/TechGeek/actions/runs/45619574701)).
 
 PR #30 stores PAPER open positions separately in .quantnifty/open_position.json, restores only today's validated PAPER position with a stale quote, persists lifecycle changes, and holds startup for specified persistence failures. PR #31 adds local option-chain receive timestamps, stale quote rejection, exact security-ID contract matching, five-level chain/depth consistency, ask-based EV, candidate evaluation audit events, per-fill gross P&L metadata, and token redaction. Existing daily remaining-loss checks, PR #28 monitor-only mode, kill switch, order journal, five-level microstructure requirement, and live-routing guard were preserved.
 
@@ -56,7 +56,7 @@ Remaining limitations: Windows-local restart validation, inspection of actual lo
 - Latest main commit date: 2026-11-25 12:04:56 UTC
 - Latest merged PR: [#28](https://github.com/Sabari2811/TechGeek/pull/28)
 - Latest main CI run inspected: [45610362317](https://github.com/Sabari2811/TechGeek/actions/runs/45610362317) — Python 3.11, 3.12 and 3.14 all passed.
-- At the latest update: 25 PRs merged, no open PRs, and 6 closed as superseded/unmerged (#4, #12, #14, #23, #24, #25).
+- At the latest update: 27 PRs merged, no open PRs, and 6 closed as superseded/unmerged (#4, #12, #14, #23, #24, #25).
 - The open branches were each 16 commits behind main at the time of the compare check; refresh before action.
 
 Repository links:
@@ -133,7 +133,7 @@ The configured `entries_allowed()` requires start time reached, before the new-e
 
 ## 6. Pull-request history
 
-### Merged PRs (25)
+### Merged PRs (27)
 
 | PR | Summary |
 |---|---|
@@ -162,6 +162,8 @@ The configured `entries_allowed()` requires start time reached, before the new-e
 | [#29](https://github.com/Sabari2811/TechGeek/pull/29) | Complete continuation handoff and sample environment placeholder cleanup |
 | [#30](https://github.com/Sabari2811/TechGeek/pull/30) | Separate PAPER open-position persistence and safe restart recovery |
 | [#31](https://github.com/Sabari2811/TechGeek/pull/31) | Quote freshness, source consistency, ask-based EV and candidate audit |
+| [#32](https://github.com/Sabari2811/TechGeek/pull/32) | Idempotent learner outcomes and strict chronological learning |
+| [#33](https://github.com/Sabari2811/TechGeek/pull/33) | Candidate and quote-integrity audit coverage in daily reports |
 
 ### Closed as superseded/unmerged (6)
 
@@ -291,16 +293,17 @@ Review finding:
 ### P1 — Forensic and market-data integrity
 
 4. Investigate the 2026-11-02 trade(s), including the reported unmatched 22750 CE entry / stop execution concern, using local audit, raw chain, order journal, session ledger and read-only broker evidence. No actual trade outcome is established by the repository alone.
-5. Provider event-time semantics: PR #31 uses local option-chain receive timestamps. Existing REST full-quote latency is round-trip latency, not exchange-event time. Verify official provider timestamp fields/schema before claiming true exchange-event freshness; do not invent a provider timestamp.
+5. Provider event-time semantics: official INDstocks docs currently show a timestamp in the WebSocket LTP example, but the REST option-chain/full-quote response schemas do not list a quote timestamp, and the WebSocket quote-mode response schema is not specified. PR #31 therefore correctly uses local option-chain receive time; REST full-quote latency remains request round-trip time, not exchange-event time. See API Conventions, Market Quotes and WebSocket docs linked below. Do not claim true option quote event-time freshness until INDstocks documents/validates the relevant quote-mode timestamp.
 6. Inspect candidate_evaluations, quote_source_consistency, candidate_blocked, entry_filled and exit_fill records after a PAPER session. Check real quote consistency and audit volume.
 
 ### P2 — Research and operations
 
 7. Build a deterministic execution backtester using historical bid/ask/depth, slippage, fees, latency and partial-fill assumptions. Clearly label assumptions and simulated results.
-8. Validate learner outcome idempotency and chronological walk-forward calibration with no look-ahead leakage.
+8. Chronological walk-forward calibration with no look-ahead leakage remains. Learner duplicate-outcome protection and strict prior-day-only updates were merged in PR #32.
 9. Improve operational health beyond process liveness: trader task health, feed freshness, last successful quote, audit write health, persistence health and safety-hold status.
 10. Review future daily reports for consistency between recorded broker fills, simulated PAPER fills and estimated exits.
-11. Update this handoff after every meaningful change.
+11. Provider documentation reviewed: [API Conventions](https://api-docs.indstocks.com/conventions/), [Market Quotes](https://api-docs.indstocks.com/MarketQuote/), and [WebSocket Streaming](https://api-docs.indstocks.com/Websockets/). The WebSocket LTP sample has a timestamp field; REST quote examples do not expose a quote timestamp. The quote-mode schema remains undocumented in the page.
+12. Update this handoff after every meaningful change.
 
 ## 10. Recommended next-session workflow
 
