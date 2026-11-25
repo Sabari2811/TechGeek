@@ -232,3 +232,51 @@
 - GitHub Actions run 45610128536 passed on Python 3.11, 3.12, and 3.14 for head `99ec5018a39b49669fa86192f35fc4ef5b79581c`.
 - PR #28 is open and ready for review; it has not been merged. Local Windows runtime validation is still required.
 - Keep the kill switch ON until the 10 unresolved journal records are independently verified and manually reconciled. PAPER-only; live routing remains disabled.
+
+---
+
+## 2026-11-25 — Position recovery and quote-integrity milestones
+
+**Current main code commit before this handoff update:** `b99739b66a6c271e071b80fe94fb7dbf4ea40738`
+
+### Merged milestones
+
+- **PR #29:** Added `PROJECT_HANDOFF_CONTINUATION_2026-11-25.md` and replaced the JWT-shaped value in `.env.example` with a harmless placeholder. The old credential remains in Git history; account owner must rotate/revoke it.
+- **PR #30:** Added separate PAPER open-position persistence at `.quantnifty/open_position.json`, IST date and data-integrity validation, restoration with stale quote state, persistence after entry/partial exit, cleanup after full close, and startup monitor-only safety holds for persistence failures.
+- **PR #31:** Added local option-chain receive timestamps, stale quote rejection, complete option-window replacement, exact security-ID contract checks for lot size, five-level chain/depth quote consistency, ask-based EV, structured candidate-evaluation audit records, per-fill gross P&L fields, and token redaction.
+
+### Safety preserved
+
+- PAPER-only development; real-money routing remains disabled.
+- PR #28 startup monitor-only mode remains intact.
+- Daily remaining-loss budget check remains in the candidate path.
+- Five-level microstructure confirmation remains mandatory.
+- Persistent kill switch and order journal remain fail-closed.
+- The one-lot default remains unchanged.
+- `.env.example` contains only a placeholder, not the old token.
+
+### PR status
+
+- PR #30 merged; PR #24 closed as superseded.
+- PR #31 merged; PR #23 closed as superseded.
+- PR #25 closed as superseded by the separate-file design in #30.
+- No open PRs were present at the time of this update.
+
+### CI
+
+- PR #30 final head: Python 3.11, 3.12 and 3.14 passed (run 45617884487).
+- PR #31 final head: Python 3.11, 3.12 and 3.14 passed (run 45618417820).
+- Main post-merge run for code commit `b99739b66a6c271e071b80fe94fb7dbf4ea40738`: run 45618535657; check its final status before further code changes.
+
+### Remaining work
+
+1. Windows-local PAPER restart validation with isolated test state.
+2. Inspect actual local open-position state, kill switch, order journal and broker evidence before any manual reconciliation.
+3. Investigate the 2026-11-02 22750 CE trade/exit discrepancy using local raw data, audit, journal and broker evidence.
+4. Verify provider exchange-event timestamp semantics; current option freshness is based on local receive time, and REST quote latency is round-trip time only.
+5. Build deterministic execution backtesting with historical bid/ask/depth, fees, slippage, latency and partial-fill assumptions.
+6. Validate learner idempotency and chronological walk-forward calibration.
+7. Improve operational health and feed/persistence/audit monitoring.
+8. Rotate the INDstocks credential that was previously committed in Git history; consider history cleanup only after rotation.
+
+**Next-session workflow:** inspect current GitHub state → validate PAPER restart locally → investigate the 2 November trade → verify provider timestamp documentation → improve backtesting/learning/operations. Never enable live trading or infer broker flatness.
