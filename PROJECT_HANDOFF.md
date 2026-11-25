@@ -280,3 +280,45 @@
 8. Rotate the INDstocks credential that was previously committed in Git history; consider history cleanup only after rotation.
 
 **Next-session workflow:** inspect current GitHub state → validate PAPER restart locally → investigate the 2 November trade → verify provider timestamp documentation → improve backtesting/learning/operations. Never enable live trading or infer broker flatness.
+
+---
+
+## 2026-11-25 — Learner and daily-report milestones
+
+**Main code commit before this documentation update:** `68eb85b50e436bcc84dacbf9fd4238688bb8c4f8` (PR #32); latest merged code commit: `f9d55270358122463810ca3af5301b904a7b9a5c` (PR #33).
+
+### PR #32 — learner correctness
+
+- Completed trade learning records now use a stable identity composed of the option security ID and original position-open timestamp.
+- Repeated calls for the same completed trade are ignored, including after a process restart.
+- Learner updates are applied only to outcomes whose trading date is strictly earlier than the current date. Same-day and future-dated outcomes remain pending.
+- Processed IDs are persisted in a bounded list. Existing probability calibration and feature-weight limits remain unchanged.
+- CI passed Python 3.11, 3.12 and 3.14 (run 45618984970).
+
+### PR #33 — daily audit coverage
+
+- Daily reports include execution and monitor-only acceptances, candidate-blocked events, candidate evaluation batch/count totals, and chain/depth quote consistency checks/mismatches.
+- Explicit warnings are added when chain/depth consistency checks fail.
+- Existing summary keys were retained for backward compatibility.
+- CI passed Python 3.11, 3.12 and 3.14 (run 45619450707).
+
+### INDstocks timestamp documentation review
+
+Official documentation reviewed:
+- API Conventions: https://api-docs.indstocks.com/conventions/
+- Market Quotes: https://api-docs.indstocks.com/MarketQuote/
+- WebSocket Streaming: https://api-docs.indstocks.com/Websockets/
+
+The conventions page states that API timestamps use IST and Unix epoch milliseconds unless specified otherwise. The WebSocket LTP example contains a timestamp field. However, the REST option-chain and full-quote response schemas do not list a quote timestamp, and the WebSocket quote-mode response schema is not specified on the documentation page. Therefore PR #31 correctly uses local option-chain receive time; REST full-quote request round-trip latency must not be represented as exchange-event time. Do not change freshness semantics until INDstocks confirms the relevant option quote timestamp field and meaning.
+
+### Remaining pending work
+
+1. Windows-local PAPER restart validation with isolated test state.
+2. Inspect actual local open-position state, kill switch, order journal and broker evidence before any manual reconciliation.
+3. Investigate the 2026-11-02 22750 CE trade/exit discrepancy using local raw data, audit, journal and broker evidence.
+4. Rotate the INDstocks credential that was previously committed in Git history; consider history cleanup only after rotation.
+5. Build deterministic execution backtesting using historical bid/ask/depth, slippage, fees, latency and partial-fill assumptions. This requires suitable historical market data and explicit fill assumptions.
+6. Validate chronological walk-forward calibration with no look-ahead leakage; learner idempotency and prior-day-only training are now implemented in PR #32.
+7. Improve operational health beyond process liveness, including feed freshness, audit write health, persistence health and safety-hold visibility.
+
+No live order routing was enabled or used during these changes.
