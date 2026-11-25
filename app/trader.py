@@ -10,11 +10,12 @@ from .microstructure import MicrostructureEngine, MicrostructureState
 from .risk import RiskManager, calculate_stop_target, cap_quantity_to_lots, daily_risk_check
 from .execution import ExecutionEngine
 from .learning import IncrementalLearner
-from .session_state import load_today, load_today_trades, save_today
+from .session_state import load_today, load_today_trades, save_today, load_open_position
 from .raw_data import record_option_chain, record_audit_event
 from .daily_reports import write_daily_report
 from .terminal import Terminal
 from .order_journal import enforce_startup_reconciliation, fetch_read_only_broker_reconciliation
+from .kill_switch import status as kill_switch_status
 
 
 async def next_expiry(client: IndstocksClient) -> str:
@@ -32,12 +33,28 @@ async def run():
     # application can consider new entries. Never infer broker flatness.
     unresolved_orders = enforce_startup_reconciliation()
     monitor_only = bool(unresolved_orders)
-    if monitor_only:
+    # Persistence failures can leave the last durable file missing or stale.
+    # Keep those specific states in manual-review monitor-only mode on restart.
+    switch_enabled, switch_reason = kill_switch_status()
+    persistence_recovery_failure = switch_enabled and (
+        "failed to persist open PAPER position" in switch_reason
+        or "failed to persist partially open PAPER position" in switch_reason
+        or "failed to clear closed PAPER position state" in switch_reason
+    )
+    if persistence_recovery_failure:
+        monitor_only = True
         hold_reason = (
-            f"STARTUP SAFETY HOLD — {len(unresolved_orders)} unresolved journal item(s). "
-            "Market analysis is read-only; all order execution is disabled."
+            "PAPER POSITION PERSISTENCE SAFETY HOLD — "
+            f"{switch_reason}. Verify the position and local state manually; no orders will be submitted."
         )
         Terminal.set_safety_hold(True, hold_reason)
+    if monitor_only:
+        if unresolved_orders:
+            hold_reason = (
+                f"STARTUP SAFETY HOLD — {len(unresolved_orders)} unresolved journal item(s). "
+                "Market analysis is read-only; all order execution is disabled."
+            )
+            Terminal.set_safety_hold(True, hold_reason)
         report_summary = "Broker snapshot not attempted (access token missing)."
         if CONFIG.access_token:
             reconciliation_client = IndstocksClient()
@@ -92,6 +109,32 @@ async def run():
     learning = IncrementalLearner()
     execution = ExecutionEngine(client)
     execution.closed_trades = list(closed_trades)
+    # Restore only PAPER positions and only after unresolved order-journal
+    # checks have passed. A recovered position is deliberately marked stale.
+    if CONFIG.mode == "PAPER" and not monitor_only:
+        try:
+            execution.position = load_open_position(datetime.now(IST).date())
+        except ValueError as exc:
+            monitor_only = True
+            hold_reason = f"PAPER POSITION RECOVERY SAFETY HOLD — {exc}"
+            Terminal.set_safety_hold(True, hold_reason)
+            record_audit_event("position_recovery_failed", {
+                "reason": str(exc),
+                "state_file": ".quantnifty/open_position.json",
+                "manual_review_required": True,
+            })
+        if execution.position is not None:
+            record_audit_event("position_restored_after_restart", {
+                "symbol": execution.position.signal.symbol,
+                "security_id": execution.position.signal.security_id,
+                "quantity": execution.position.quantity,
+                "entry_price": execution.position.entry_price,
+                "stop_price": execution.position.signal.stop,
+                "target_price": execution.position.signal.target,
+                "opened_at": execution.position.opened_at.isoformat(),
+                "quote_required_before_exit": True,
+                "mode": CONFIG.mode,
+            })
     expiry = None
     risk_day = datetime.now(IST).date()
     reported_day = None
