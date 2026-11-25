@@ -410,7 +410,9 @@ async def run():
                 await asyncio.sleep(CONFIG.poll_seconds)
                 continue
 
-            record_audit_event("signal_accepted_for_execution", {
+            record_audit_event(
+                "signal_accepted_for_monitoring" if monitor_only else "signal_accepted_for_execution",
+                {
                 "security_id": signal.security_id,
                 "symbol": signal.symbol,
                 "option_type": signal.option_type,
