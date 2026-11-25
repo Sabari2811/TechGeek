@@ -49,9 +49,25 @@ def build_daily_report(day: date, include_raw: bool = True) -> dict:
     fills = reconcile_recorded_fills(audit_path) if audit_path.exists() else []
     realized = round(sum(float(t["gross_or_recorded_pnl"]) for t in trades), 2)
 
-    accepted = [e for e in events if e.get("event_type") == "signal_accepted_for_execution"]
-    rejected = [e for e in events if e.get("event_type") == "signal_rejected"]
+    accepted = [
+        e for e in events
+        if e.get("event_type") in {"signal_accepted_for_execution", "signal_accepted_for_monitoring"}
+    ]
+    rejected = [
+        e for e in events
+        if e.get("event_type") in {"signal_rejected", "candidate_blocked"}
+    ]
     micro = [e for e in events if e.get("event_type") == "microstructure_check"]
+    candidate_evaluations = [e for e in events if e.get("event_type") == "candidate_evaluations"]
+    quote_consistency = [e for e in events if e.get("event_type") == "quote_source_consistency"]
+    candidate_count = sum(
+        int(e.get("payload", {}).get("candidate_count", 0) or 0)
+        for e in candidate_evaluations
+    )
+    quote_mismatches = sum(
+        1 for e in quote_consistency
+        if e.get("payload", {}).get("consistent") is False
+    )
     chain_records = load_option_chain_records(chain_path)
     raw_events = _redact(events) if include_raw else None
 
@@ -64,6 +80,8 @@ def build_daily_report(day: date, include_raw: bool = True) -> dict:
         warnings.append("No closed session-ledger trades or recorded fill events were found; this does not prove no trade occurred.")
     if any(not f.get("pnl_is_realized_in_recorded_events") for f in fills):
         warnings.append("At least one recorded entry is not fully reconciled with recorded exit fills.")
+    if quote_mismatches:
+        warnings.append(f"{quote_mismatches} chain/depth quote consistency check(s) failed.")
     warnings.append("Session-ledger P&L is recorded application P&L; fees, taxes and broker statements are not independently verified.")
 
     report = {
@@ -78,8 +96,12 @@ def build_daily_report(day: date, include_raw: bool = True) -> dict:
         "summary": {
             "closed_session_ledger_trades": len(trades),
             "recorded_entry_fill_positions": len(fills),
-            "accepted_execution_candidates": len(accepted),
-            "signal_rejection_cycles": len(rejected),
+            "accepted_execution_or_monitoring_candidates": len(accepted),
+            "signal_rejection_and_candidate_block_events": len(rejected),
+            "candidate_evaluation_batches": len(candidate_evaluations),
+            "candidates_evaluated": candidate_count,
+            "quote_source_consistency_checks": len(quote_consistency),
+            "quote_source_mismatches": quote_mismatches,
             "microstructure_checks": len(micro),
             "option_chain_snapshots": len(chain_records),
             "recorded_session_ledger_pnl": realized,
@@ -90,6 +112,8 @@ def build_daily_report(day: date, include_raw: bool = True) -> dict:
         "accepted_candidates": [_redact(e) for e in accepted],
         "rejection_decisions": [_redact(e) for e in rejected],
         "microstructure_evidence": [_redact(e) for e in micro],
+        "candidate_evaluations": [_redact(e) for e in candidate_evaluations],
+        "quote_source_consistency": [_redact(e) for e in quote_consistency],
         "warnings": warnings,
         "raw_audit_events": raw_events,
         "raw_option_chain_snapshots": _redact(chain_records) if include_raw else None,
@@ -115,8 +139,10 @@ def write_daily_report(day: date) -> dict:
         "",
         f"- Closed ledger trades: {report['summary']['closed_session_ledger_trades']}",
         f"- Recorded session P&L: ₹{report['summary']['recorded_session_ledger_pnl']:,.2f}",
-        f"- Accepted candidates: {report['summary']['accepted_execution_candidates']}",
-        f"- Rejection cycles: {report['summary']['signal_rejection_cycles']}",
+        f"- Accepted execution/monitoring events: {report['summary']['accepted_execution_or_monitoring_candidates']}",
+        f"- Candidates evaluated: {report['summary']['candidates_evaluated']}",
+        f"- Rejection/block events: {report['summary']['signal_rejection_and_candidate_block_events']}",
+        f"- Quote-source mismatches: {report['summary']['quote_source_mismatches']}",
         f"- Option-chain snapshots: {report['summary']['option_chain_snapshots']}",
         "",
         "## Trade ledger",
@@ -130,6 +156,6 @@ def write_daily_report(day: date) -> dict:
     else:
         analysis.append("No closed trades found in the session ledger.")
     analysis += ["", "## Warnings"] + [f"- {w}" for w in report["warnings"]]
-    analysis += ["", "## Evidence", "See daily_report.json for candidate decisions, microstructure checks, fill reconciliation and raw audit events."]
+    analysis += ["", "## Evidence", "See daily_report.json for candidate decisions, quote-source checks, microstructure evidence, fill reconciliation and raw audit events."]
     (folder / "analysis.md").write_text("\n".join(analysis) + "\n", encoding="utf-8")
     return report
