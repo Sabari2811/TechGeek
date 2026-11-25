@@ -270,7 +270,7 @@ async def run():
                             await asyncio.sleep(CONFIG.poll_seconds)
                             continue
                         risk.record_trade(closed.realized_pnl)
-                        learning.record(p.signal, closed.realized_pnl)
+                        learning.record(p.signal, closed.realized_pnl, outcome_id=f"{p.signal.security_id}:{p.opened_at.isoformat()}")
                         save_today(state.spot_history, today, execution.closed_trades)
                         Terminal.set_trade_state(execution.position, execution.closed_trades, len(execution.closed_trades) + (1 if execution.position else 0))
                         Terminal.closed(closed, state.spot)
@@ -286,7 +286,7 @@ async def run():
                             await asyncio.sleep(CONFIG.poll_seconds)
                             continue
                         risk.record_trade(closed.realized_pnl)
-                        learning.record(p.signal, closed.realized_pnl)
+                        learning.record(p.signal, closed.realized_pnl, outcome_id=f"{p.signal.security_id}:{p.opened_at.isoformat()}")
                         save_today(state.spot_history, today, execution.closed_trades)
                         Terminal.set_trade_state(execution.position, execution.closed_trades, len(execution.closed_trades) + (1 if execution.position else 0))
                         Terminal.closed(closed, state.spot)
@@ -322,7 +322,7 @@ async def run():
                         await asyncio.sleep(CONFIG.poll_seconds)
                         continue
                     risk.record_trade(closed.realized_pnl)
-                    learning.record(p.signal, closed.realized_pnl)
+                    learning.record(p.signal, closed.realized_pnl, outcome_id=f"{p.signal.security_id}:{p.opened_at.isoformat()}")
                     save_today(state.spot_history, today, execution.closed_trades)
                     Terminal.set_trade_state(execution.position, execution.closed_trades, len(execution.closed_trades) + (1 if execution.position else 0))
                     Terminal.closed(closed, state.spot, execution.closed_trades, risk.state.trades_today)
