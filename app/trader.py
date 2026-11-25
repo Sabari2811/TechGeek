@@ -128,7 +128,7 @@ async def run():
                     except Exception as exc:
                         print(f"DAILY REPORT GENERATION FAILED: {type(exc).__name__}: {exc}")
                 Terminal.waiting(state.spot, "Outside market session. Run during 09:30–15:15 IST.")
-                await asyncio.sleep(30)
+                await asyncio.sleep(CONFIG.poll_seconds if monitor_only else 30)
                 continue
 
             try:
