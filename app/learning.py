@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import tempfile
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import date, datetime
 from .config import IST
 from pathlib import Path
 from typing import Dict, List
@@ -31,6 +32,7 @@ class LearningState:
     weights: Dict[str, float] = field(default_factory=lambda: dict(DEFAULT_WEIGHTS))
     pending: List[dict] = field(default_factory=list)
     last_learning_date: str = ""
+    processed_outcome_ids: List[str] = field(default_factory=list)
 
 
 class IncrementalLearner:
@@ -48,10 +50,30 @@ class IncrementalLearner:
     def _load(self) -> LearningState:
         try:
             raw = json.loads(self.path.read_text(encoding="utf-8"))
+            if not isinstance(raw, dict):
+                raise ValueError("learning state must be an object")
             state = LearningState(**{k: raw[k] for k in LearningState.__dataclass_fields__ if k in raw})
             merged = dict(DEFAULT_WEIGHTS)
             merged.update(state.weights or {})
-            state.weights = {k: float(max(0.5, min(1.5, v))) for k, v in merged.items()}
+            cleaned_weights = {}
+            for key, value in merged.items():
+                try:
+                    number = float(value)
+                except (TypeError, ValueError, OverflowError):
+                    number = 1.0
+                cleaned_weights[str(key)] = max(0.5, min(1.5, number)) if math.isfinite(number) else 1.0
+            state.weights = cleaned_weights
+            if not isinstance(state.pending, list):
+                state.pending = []
+            if not isinstance(state.processed_outcome_ids, list):
+                state.processed_outcome_ids = []
+            known = {str(value) for value in state.processed_outcome_ids if str(value).strip()}
+            known.update(
+                str(item.get("outcome_id"))
+                for item in state.pending
+                if isinstance(item, dict) and item.get("outcome_id")
+            )
+            state.processed_outcome_ids = list(known)[-5000:]
             return state
         except (FileNotFoundError, OSError, ValueError, TypeError, json.JSONDecodeError):
             return LearningState()
@@ -68,6 +90,7 @@ class IncrementalLearner:
             "weights": self.state.weights,
             "pending": self.state.pending[-500:],
             "last_learning_date": self.state.last_learning_date,
+            "processed_outcome_ids": self.state.processed_outcome_ids[-5000:],
         }
         fd, tmp = tempfile.mkstemp(prefix="learning_", suffix=".json", dir=str(self.path.parent))
         try:
@@ -84,15 +107,29 @@ class IncrementalLearner:
     def _result_probability(signal) -> float:
         return max(0.01, min(0.99, float(signal.probability)))
 
-    def record(self, signal, pnl: float) -> None:
-        outcome = 1.0 if pnl > 0 else 0.0
-        self.state.pending.append({
+    def record(self, signal, pnl: float, outcome_id: str | None = None) -> bool:
+        """Persist a completed outcome once; return False for a duplicate ID."""
+        pnl_value = float(pnl)
+        if not math.isfinite(pnl_value):
+            raise ValueError("learning P&L must be finite")
+        identity = str(outcome_id).strip() if outcome_id is not None else ""
+        if identity and identity in self.state.processed_outcome_ids:
+            return False
+
+        item = {
             "date": datetime.now(IST).date().isoformat(),
             "probability": self._result_probability(signal),
-            "pnl": float(pnl),
+            "pnl": pnl_value,
             "components": dict(getattr(signal, "score_components", {})),
-        })
+        }
+        if identity:
+            item["outcome_id"] = identity
+            self.state.processed_outcome_ids.append(identity)
+            self.state.processed_outcome_ids = self.state.processed_outcome_ids[-5000:]
+        self.state.pending.append(item)
+        self.state.pending = self.state.pending[-500:]
         self._save()
+        return True
 
     def probability(self, raw_probability: float) -> float:
         """Apply the learned calibration bias, bounded to ±5 percentage points."""
@@ -102,41 +139,78 @@ class IncrementalLearner:
         return self.state.weights.get(name, 1.0)
 
     def learn_if_new_day(self, current_date: str | None = None) -> bool:
-        today = current_date or datetime.now(IST).date().isoformat()
+        today_text = current_date or datetime.now(IST).date().isoformat()
+        try:
+            today = date.fromisoformat(today_text)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("current_date must be an ISO date") from exc
+
         if not self.state.pending:
-            self.state.last_learning_date = today
+            self.state.last_learning_date = today.isoformat()
             self._save()
             return False
 
-        dates = {item.get("date") for item in self.state.pending}
-        eligible = [item for item in self.state.pending if item.get("date") != today]
+        eligible = []
+        remaining = []
+        for item in self.state.pending:
+            if not isinstance(item, dict):
+                continue
+            try:
+                outcome_date = date.fromisoformat(str(item.get("date", "")))
+            except ValueError:
+                remaining.append(item)
+                continue
+            if outcome_date < today:
+                eligible.append(item)
+            else:
+                # Never train on same-day or future-dated outcomes.
+                remaining.append(item)
+
         if not eligible:
             return False
 
-        reward_sum = 0.0
         for item in eligible:
-            p = max(0.01, min(0.99, float(item.get("probability", 0.5))))
-            y = 1.0 if float(item.get("pnl", 0.0)) > 0 else 0.0
+            try:
+                p = float(item.get("probability", 0.5))
+                pnl_value = float(item.get("pnl", 0.0))
+            except (TypeError, ValueError, OverflowError):
+                continue
+            if not math.isfinite(p) or not math.isfinite(pnl_value):
+                continue
+            p = max(0.01, min(0.99, p))
+            y = 1.0 if pnl_value > 0 else 0.0
             reward = 1.0 if y else -1.0
-            reward_sum += reward
             self.state.total_outcomes += 1
             self.state.wins += int(y == 1.0)
             self.state.losses += int(y == 0.0)
             self.state.brier_sum += (p - y) ** 2
 
             error = y - p
-            self.state.probability_bias = max(-0.05, min(0.05, self.state.probability_bias + 0.02 * error))
+            self.state.probability_bias = max(
+                -0.05,
+                min(0.05, self.state.probability_bias + 0.02 * error),
+            )
 
             components = item.get("components") or {}
-            total = sum(max(0.0, float(v)) for v in components.values()) or 1.0
+            if not isinstance(components, dict):
+                components = {}
+            valid_components = {}
             for name, value in components.items():
-                share = max(0.0, float(value)) / total
+                try:
+                    number = float(value)
+                except (TypeError, ValueError, OverflowError):
+                    continue
+                if math.isfinite(number) and number > 0:
+                    valid_components[str(name)] = number
+            total = sum(valid_components.values()) or 1.0
+            for name, value in valid_components.items():
+                share = value / total
                 delta = 0.015 * reward * share
                 old = self.state.weights.get(name, 1.0)
                 self.state.weights[name] = max(0.5, min(1.5, old + delta))
 
-        self.state.pending = [item for item in self.state.pending if item.get("date") == today]
-        self.state.last_learning_date = today
+        self.state.pending = remaining[-500:]
+        self.state.last_learning_date = today.isoformat()
         self._save()
         return True
 
