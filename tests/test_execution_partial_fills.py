@@ -56,11 +56,14 @@ def make_signal(quantity=5):
 
 @pytest.fixture
 def live_mode(monkeypatch, tmp_path):
-    # Keep simulated broker events out of the real .quantnifty/orders journal.
+    # Simulated broker activity must never touch persistent local runtime state.
     monkeypatch.setattr("app.order_journal.JOURNAL_ROOT", tmp_path / "orders")
+    monkeypatch.setattr("app.raw_data.AUDIT_ROOT", tmp_path / "audit")
     monkeypatch.setattr(type(CONFIG), "live_enabled", lambda self: True)
+
     async def no_sleep(_seconds):
         return None
+
     monkeypatch.setattr("app.execution.asyncio.sleep", no_sleep)
 
 
@@ -79,18 +82,18 @@ def test_partial_exit_keeps_remaining_position_and_accumulates_fills(live_mode):
             opened_at=datetime(2026, 10, 21, 10, 0),
             current_price=190.0,
         )
-    
+
         first = await engine.exit(190.0, "STOP LOSS")
-    
+
         assert first is None
         assert engine.position is not None
         assert engine.position.quantity == 3
         assert engine.position.exit_filled_quantity == 2
         assert engine.position.exit_proceeds == 380.0
         assert engine.closed_trades == []
-    
+
         closed = await engine.exit(185.0, "STOP LOSS")
-    
+
         assert closed is not None
         assert engine.position is None
         assert closed.quantity == 0
@@ -102,7 +105,7 @@ def test_partial_exit_keeps_remaining_position_and_accumulates_fills(live_mode):
         assert engine.closed_trades[0].quantity == 5
         assert engine.closed_trades[0].exit_price == pytest.approx(187.0)
         assert engine.closed_trades[0].pnl == pytest.approx(-65.0)
-        
+
     asyncio.run(scenario())
 
 
