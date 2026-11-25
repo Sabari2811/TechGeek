@@ -147,6 +147,16 @@ class QuantEngine:
         return cls.black_scholes_price(state.spot, q.strike, vol, q.option_type, state.expiry or "")
 
     @staticmethod
+    def executable_entry_ev(probability: float, entry: float, stop: float,
+                            target: float, spread: float) -> tuple[float, float]:
+        """Estimate EV from the executable ask and the stop/target derived from it."""
+        win = max(0.0, target - entry)
+        loss = max(0.0, entry - stop)
+        ev = probability * win - (1.0 - probability) * loss
+        net_ev = ev - max(0.0, spread) * 0.5 - max(0.0, entry) * 0.002
+        return ev, net_ev
+
+    @staticmethod
     def _score_components(mispricing: float, probability: float, iv: float, rv: float,
                           oi_change: float, oi: float, volume: float, delta: float) -> dict[str, float]:
         valuation = max(0.0, min(25.0, 12.5 + 25.0 * mispricing))
@@ -361,32 +371,56 @@ class QuantEngine:
         metrics = cls.phase_metrics(state)
         phase, direction, phase_confidence = cls.market_phase(state)
         metrics.update({"phase": phase, "direction": direction, "phase_confidence": phase_confidence})
+        gates: dict[str, bool] = {}
+
+        def reject(gate: str, reason: str, extra: dict | None = None):
+            gates[gate] = False
+            result = dict(metrics)
+            if extra:
+                result.update(extra)
+            result["gate_results"] = dict(gates)
+            result["blocking_reason"] = reason
+            return None, reason, result
+
+        def passed(gate: str):
+            gates[gate] = True
 
         if q.ltp <= 0:
-            return None, "INVALID_LTP", metrics
+            return reject("valid_ltp", "INVALID_LTP")
+        passed("valid_ltp")
+
         if q.bid <= 0 or q.ask <= 0:
-            return None, "INVALID_BID_ASK", metrics
+            return reject("valid_bid_ask", "INVALID_BID_ASK")
+        passed("valid_bid_ask")
+
         if q.spread_pct > CONFIG.max_spread_pct:
-            return None, "SPREAD_TOO_WIDE", metrics
+            return reject("spread_limit", "SPREAD_TOO_WIDE", {"spread_pct": q.spread_pct})
+        passed("spread_limit")
 
         # Hard market-regime gates run before fair value, probability and EV.
         # This makes the audit truthful: no mathematical edge is evaluated while
         # the market is still in accumulation or moving against the option side.
         if phase not in {"EARLY_CONFIRMATION", "BREAKOUT"}:
-            return None, "MARKET_PHASE_WAIT", metrics
+            return reject("market_phase", "MARKET_PHASE_WAIT")
+        passed("market_phase")
+
         aligned = "BULLISH" if q.option_type == "CE" else "BEARISH"
         if direction not in {"NEUTRAL", aligned}:
-            return None, "DIRECTION_MISMATCH", metrics
+            return reject("direction_alignment", "DIRECTION_MISMATCH", {"required_direction": aligned})
+        passed("direction_alignment")
 
         cls.ensure_greeks(state, q)
         fair = cls.fair_value_proxy(state, q)
         rv = cls.realized_vol(state.spot_history)
         iv = q.iv / 100.0 if q.iv > 1 else q.iv
         if iv <= 0:
-            return None, "IV_MISSING", metrics
+            return reject("iv_available", "IV_MISSING", {"fair": fair, "iv": iv})
+        passed("iv_available")
+
         vol = max(rv, iv, 0.05)
         if rv <= 0:
-            return None, "RV_INSUFFICIENT", metrics
+            return reject("realized_volatility", "RV_INSUFFICIENT", {"fair": fair, "iv": iv, "rv": rv})
+        passed("realized_volatility")
 
         now = datetime.now(IST)
         session_start = now.replace(hour=9, minute=30, second=0, microsecond=0)
@@ -407,18 +441,29 @@ class QuantEngine:
         if learner:
             probability = learner.probability(probability)
         if probability < 0.55:
-            return None, "PROBABILITY_BELOW_55", {**metrics, "probability": probability, "fair": fair}
+            return reject("probability_threshold", "PROBABILITY_BELOW_55",
+                          {"probability": probability, "fair": fair, "mispricing": mispricing})
+        passed("probability_threshold")
 
-        stop = max(q.ltp * 0.75, q.ltp - risk_per_share)
-        target = q.ltp + (q.ltp - stop) * target_multiple
-        win = max(0.0, target - q.ltp)
-        loss = max(0.0, q.ltp - stop)
-        ev = probability * win - (1 - probability) * loss
-        net_ev = ev - q.spread * 0.5 - q.ltp * 0.002
-        metrics.update({"probability": probability, "fair": fair, "expected_value": ev, "net_expected_value": net_ev})
-
+        entry = q.ask
+        stop = max(entry * 0.75, entry - risk_per_share)
+        target = entry + (entry - stop) * target_multiple
+        ev, net_ev = cls.executable_entry_ev(probability, entry, stop, target, q.spread)
+        metrics.update({
+            "probability": probability,
+            "fair": fair,
+            "mispricing": mispricing,
+            "entry_price_basis": "ASK",
+            "entry_price": entry,
+            "stop_price": stop,
+            "target_price": target,
+            "expected_value": ev,
+            "net_expected_value": net_ev,
+        })
         if net_ev < 0:
-            return None, "NEGATIVE_NET_EV", metrics
+            return reject("net_expected_value", "NEGATIVE_NET_EV")
+        passed("net_expected_value")
+        metrics["gate_results"] = dict(gates)
 
         components = cls._score_components(mispricing, probability, iv, rv, q.oi_change, q.oi, q.volume, q.delta)
         score = cls._score(components, learner)
@@ -459,6 +504,7 @@ class QuantEngine:
         if audit is not None:
             audit.total_options = 0
             audit.calls = audit.puts = 0
+            audit.candidate_events.clear()
             audit.rejected.clear()
             audit.best_rejected_reason = ""
             audit.best_rejected_symbol = ""
@@ -489,6 +535,71 @@ class QuantEngine:
                     audit.puts += 1
             signal, reason, metrics = cls.evaluate_diagnostic(state, q, risk_per_share, learner=learner)
             if audit is not None:
+                quote_ts = q.observed_at
+                if quote_ts is not None and quote_ts.tzinfo is None:
+                    quote_ts = quote_ts.replace(tzinfo=IST)
+                quote_age = (
+                    max(0.0, (datetime.now(IST) - quote_ts).total_seconds())
+                    if quote_ts is not None else None
+                )
+                eligible = bool(signal and signal.net_expected_value >= min_net_ev)
+                audit.candidate_events.append({
+                    "security_id": q.security_id,
+                    "symbol": q.symbol,
+                    "option_type": q.option_type,
+                    "strike": q.strike,
+                    "expiry": state.expiry,
+                    "spot": state.spot,
+                    "futures": state.futures if state.futures > 0 else None,
+                    "vix": state.vix if state.vix > 0 else None,
+                    "option_quote_timestamp": quote_ts.isoformat() if quote_ts else None,
+                    "option_quote_age_seconds": quote_age,
+                    "ltp": q.ltp,
+                    "bid": q.bid,
+                    "ask": q.ask,
+                    "spread": q.spread,
+                    "spread_pct": q.spread_pct,
+                    "volume": q.volume,
+                    "oi": q.oi,
+                    "previous_oi": q.previous_oi,
+                    "oi_change": q.oi_change,
+                    "iv": q.iv,
+                    "delta": q.delta,
+                    "gamma": q.gamma,
+                    "theta": q.theta,
+                    "vega": q.vega,
+                    "evaluation_reason": reason,
+                    "blocking_reason": (
+                        reason if signal is None else
+                        "PASS" if eligible else "MIN_NET_EV_NOT_MET"
+                    ),
+                    "explanation": (
+                        f"{q.symbol or f'{q.strike:g}{q.option_type}'}: "
+                        f"{reason if signal is None else ('eligible' if eligible else 'net EV below minimum')}; "
+                        f"phase={metrics.get('phase', 'UNKNOWN')}, "
+                        f"direction={metrics.get('direction', 'NEUTRAL')}, "
+                        f"probability={signal.probability if signal else metrics.get('probability')}, "
+                        f"netEV={signal.net_expected_value if signal else metrics.get('net_expected_value')}, "
+                        f"spread_pct={q.spread_pct}"
+                    ),
+                    "metrics": dict(metrics),
+                    "gate_results": {
+                        **dict(metrics.get("gate_results", {})),
+                        **({"min_net_ev": eligible} if signal is not None else {}),
+                    },
+                    "signal_ready": signal is not None,
+                    "eligible_for_execution": eligible,
+                    "probability": signal.probability if signal else metrics.get("probability"),
+                    "fair_value": signal.fair_value if signal else metrics.get("fair"),
+                    "expected_value": signal.expected_value if signal else metrics.get("expected_value"),
+                    "net_expected_value": signal.net_expected_value if signal else metrics.get("net_expected_value"),
+                    "score": signal.score if signal else None,
+                    "score_components": dict(signal.score_components) if signal else None,
+                    "checks": dict(signal.checks) if signal else None,
+                    "market_phase": signal.market_phase if signal else metrics.get("phase"),
+                    "direction_bias": signal.direction_bias if signal else metrics.get("direction"),
+                    "selected_for_execution": False,
+                })
                 audit.evaluated += 1
                 audit.reject(reason)
                 candidate_ev = float(metrics.get("net_expected_value", float("-inf")))

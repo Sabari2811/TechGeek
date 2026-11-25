@@ -1,4 +1,5 @@
 import asyncio
+import json
 from datetime import datetime
 
 import pytest
@@ -56,18 +57,19 @@ def make_signal(quantity=5):
 
 @pytest.fixture
 def live_mode(monkeypatch, tmp_path):
-    # Simulated broker activity must never touch persistent local runtime state.
+    # Keep simulated broker events out of the real .quantnifty/orders journal.
     monkeypatch.setattr("app.order_journal.JOURNAL_ROOT", tmp_path / "orders")
+    # Keep simulated lifecycle events out of the real .quantnifty/audit journal.
     monkeypatch.setattr("app.raw_data.AUDIT_ROOT", tmp_path / "audit")
     monkeypatch.setattr(type(CONFIG), "live_enabled", lambda self: True)
-
     async def no_sleep(_seconds):
         return None
-
     monkeypatch.setattr("app.execution.asyncio.sleep", no_sleep)
+    return tmp_path
 
 
 def test_partial_exit_keeps_remaining_position_and_accumulates_fills(live_mode):
+    tmp_path = live_mode
     async def scenario():
         client = FakeClient([
             {"status": "PARTIALLY FILLED - CANCELLED", "traded_qty": 2, "traded_price": 190.0},
@@ -82,18 +84,18 @@ def test_partial_exit_keeps_remaining_position_and_accumulates_fills(live_mode):
             opened_at=datetime(2026, 10, 21, 10, 0),
             current_price=190.0,
         )
-
+    
         first = await engine.exit(190.0, "STOP LOSS")
-
+    
         assert first is None
         assert engine.position is not None
         assert engine.position.quantity == 3
         assert engine.position.exit_filled_quantity == 2
         assert engine.position.exit_proceeds == 380.0
         assert engine.closed_trades == []
-
+    
         closed = await engine.exit(185.0, "STOP LOSS")
-
+    
         assert closed is not None
         assert engine.position is None
         assert closed.quantity == 0
@@ -105,6 +107,18 @@ def test_partial_exit_keeps_remaining_position_and_accumulates_fills(live_mode):
         assert engine.closed_trades[0].quantity == 5
         assert engine.closed_trades[0].exit_price == pytest.approx(187.0)
         assert engine.closed_trades[0].pnl == pytest.approx(-65.0)
+
+        audit_files = list((tmp_path / "audit").glob("*.jsonl"))
+        assert len(audit_files) == 1
+        events = [json.loads(line) for line in audit_files[0].read_text().splitlines()]
+        exits = [event["payload"] for event in events if event["event_type"] == "exit_fill"]
+        assert len(exits) == 2
+        assert exits[0]["gross_pnl_for_fill"] == pytest.approx(-20.0)
+        assert exits[1]["gross_pnl_for_fill"] == pytest.approx(-45.0)
+        assert exits[1]["cumulative_gross_pnl"] == pytest.approx(-65.0)
+        assert all(event["estimated_charges"] is None for event in exits)
+        assert all(event["net_pnl"] is None for event in exits)
+        assert all(event["charges_status"] == "NOT_ESTIMATED" for event in exits)
 
     asyncio.run(scenario())
 
