@@ -60,3 +60,53 @@ def test_daily_report_includes_closed_session_ledger_trade(tmp_path, monkeypatch
     assert report["summary"]["closed_session_ledger_trades"] == 1
     assert report["summary"]["recorded_session_ledger_pnl"] == 650
     assert report["trades"][0]["exit_reason"] == "TARGET"
+
+
+def test_daily_report_summarizes_candidate_and_quote_source_audits(tmp_path, monkeypatch):
+    day = date(2026, 11, 25)
+    audit = tmp_path / "audit"
+    raw = tmp_path / "raw"
+    audit.mkdir()
+    raw.mkdir()
+    monkeypatch.setattr(daily_reports, "AUDIT_ROOT", audit)
+    monkeypatch.setattr(daily_reports, "RAW_ROOT", raw)
+    monkeypatch.setattr(session_state, "STATE_PATH", tmp_path / "session_state.json")
+
+    timestamp = datetime(2026, 11, 25, 10, 0, tzinfo=ZoneInfo("Asia/Kolkata"))
+    raw_data.record_audit_event(
+        "candidate_evaluations",
+        {"candidate_count": 3, "candidates": [{"security_id": "1"}, {"security_id": "2"}, {"security_id": "3"}]},
+        timestamp,
+    )
+    raw_data.record_audit_event(
+        "signal_accepted_for_monitoring",
+        {"symbol": "NIFTY-25000-CE"},
+        timestamp,
+    )
+    raw_data.record_audit_event(
+        "candidate_blocked",
+        {"stage": "quote_source_consistency", "reason": "chain/depth mismatch"},
+        timestamp,
+    )
+    raw_data.record_audit_event(
+        "quote_source_consistency",
+        {"security_id": "2", "consistent": False},
+        timestamp,
+    )
+    raw_data.record_audit_event(
+        "quote_source_consistency",
+        {"security_id": "3", "consistent": True},
+        timestamp,
+    )
+
+    report = daily_reports.build_daily_report(day)
+
+    assert report["summary"]["accepted_execution_or_monitoring_candidates"] == 1
+    assert report["summary"]["signal_rejection_and_candidate_block_events"] == 1
+    assert report["summary"]["candidate_evaluation_batches"] == 1
+    assert report["summary"]["candidates_evaluated"] == 3
+    assert report["summary"]["quote_source_consistency_checks"] == 2
+    assert report["summary"]["quote_source_mismatches"] == 1
+    assert len(report["candidate_evaluations"]) == 1
+    assert len(report["quote_source_consistency"]) == 2
+    assert any("quote consistency check(s) failed" in warning for warning in report["warnings"])
