@@ -10,7 +10,7 @@ from .microstructure import MicrostructureEngine, MicrostructureState
 from .risk import RiskManager, calculate_stop_target, cap_quantity_to_lots, daily_risk_check
 from .execution import ExecutionEngine
 from .learning import IncrementalLearner
-from .session_state import load_today, load_today_trades, save_today
+from .session_state import load_today, load_today_trades, save_today, load_open_position
 from .raw_data import record_option_chain, record_audit_event
 from .daily_reports import write_daily_report
 from .terminal import Terminal
@@ -92,6 +92,32 @@ async def run():
     learning = IncrementalLearner()
     execution = ExecutionEngine(client)
     execution.closed_trades = list(closed_trades)
+    # Restore only PAPER positions and only after unresolved order-journal
+    # checks have passed. A recovered position is deliberately marked stale.
+    if CONFIG.mode == "PAPER" and not monitor_only:
+        try:
+            execution.position = load_open_position(datetime.now(IST).date())
+        except ValueError as exc:
+            monitor_only = True
+            hold_reason = f"PAPER POSITION RECOVERY SAFETY HOLD — {exc}"
+            Terminal.set_safety_hold(True, hold_reason)
+            record_audit_event("position_recovery_failed", {
+                "reason": str(exc),
+                "state_file": ".quantnifty/open_position.json",
+                "manual_review_required": True,
+            })
+        if execution.position is not None:
+            record_audit_event("position_restored_after_restart", {
+                "symbol": execution.position.signal.symbol,
+                "security_id": execution.position.signal.security_id,
+                "quantity": execution.position.quantity,
+                "entry_price": execution.position.entry_price,
+                "stop_price": execution.position.signal.stop,
+                "target_price": execution.position.signal.target,
+                "opened_at": execution.position.opened_at.isoformat(),
+                "quote_required_before_exit": True,
+                "mode": CONFIG.mode,
+            })
     expiry = None
     risk_day = datetime.now(IST).date()
     reported_day = None
