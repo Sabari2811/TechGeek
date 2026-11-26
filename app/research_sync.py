@@ -111,7 +111,7 @@ def _read_new_bytes(path: Path, offset: int) -> tuple[bytes, int]:
 
 
 def build_batch_archive(day: str, state: dict | None = None) -> tuple[bytes, dict, int]:
-    state = state or _load_state()
+    state = _load_state() if state is None else state
     offsets = dict(state.get("offsets", {}))
     manifest = {"schema_version": 1, "trading_date": day, "created_at": datetime.now(IST).isoformat(),
                 "mode": CONFIG.mode, "files": []}
