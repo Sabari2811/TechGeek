@@ -322,3 +322,19 @@ The conventions page states that API timestamps use IST and Unix epoch milliseco
 7. Improve operational health beyond process liveness, including feed freshness, audit write health, persistence health and safety-hold visibility.
 
 No live order routing was enabled or used during these changes.
+
+---
+
+## 2026-11-26 — Private PAPER research archive (PR #35)
+
+- Merged PR #35 (merge commit `caa3f7901bc453fa6cdf57c6cfd42c3fcf01dee6`): added GitHub batch sync for local PAPER research evidence.
+- Destination repository: `Sabari2811/Mathematical-Trading-Research` (verified private).
+- The app captures raw option-chain snapshots, decision/execution audit events and daily report summaries under local `.quantnifty/`; configured sync uploads newly appended bytes every 300 seconds and uploads the post-market report.
+- Upload verifies destination privacy on every run, redacts credential-like fields, enforces a 20 MiB archive cap and advances local byte cursors only after GitHub confirms upload.
+- Explicitly supplied empty cursor state is honored; regression test added.
+- The sync refuses non-PAPER mode or enabled live routing. It does not submit, cancel or reconcile broker orders. It excludes `.env`, local order journal, open-position state and kill-switch state. Existing kill-switch, monitor-only and reconciliation safeguards remain unchanged.
+- Setup is documented in `docs/PRIVATE_PAPER_RESEARCH_ARCHIVE.md`. Local `.env` must contain `GH_RESEARCH_REPOSITORY=Sabari2811/Mathematical-Trading-Research`, `GH_RESEARCH_TOKEN` (fine-grained token scoped to this repo with Contents read/write), and `GH_RESEARCH_SYNC_INTERVAL_SECONDS=300`.
+- GitHub Actions final head run 45808856184 passed on Python 3.11, 3.12 and 3.14.
+- Not yet validated: Windows-local startup, actual token authentication, or first upload. Do not claim data is already in the private repository until a successful local upload is confirmed.
+- Keep the GitHub token only in local `.env`; never paste it into chat or commit it. Rotate any credential accidentally exposed outside its intended secret store.
+- Next: validate locally in PAPER mode, confirm the first batch appears in the private repository, inspect ZIP contents, then verify subsequent batches advance without duplication. Never enable live routing.
