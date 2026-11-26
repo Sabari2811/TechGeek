@@ -9,15 +9,16 @@ the raw/audit streams have already been uploaded incrementally.
 
 ## Required setup
 
-1. Create a new GitHub repository under your account named `QuantNifty-Research`.
-   Set **Visibility = Private**. Do not use the public TechGeek repository for trading records.
-2. Create a fine-grained personal access token limited to that private repository,
+1. Use the private GitHub repository [Mathematical-Trading-Research](https://github.com/Sabari2811/Mathematical-Trading-Research)
+   under your account. Its repository identifier is
+   `Sabari2811/Mathematical-Trading-Research`. Do not use the public TechGeek repository for trading records.
+2. Create a fine-grained personal access token limited to this private repository,
    with **Contents: Read and write** permission. Do not paste the token into chat or commit it.
 3. On your Windows machine, copy `.env.example` to `.env` (if not already done) and set:
 
    ```dotenv
    TRADING_MODE=PAPER
-   GH_RESEARCH_REPOSITORY=YOUR_GITHUB_USERNAME/QuantNifty-Research
+   GH_RESEARCH_REPOSITORY=Sabari2811/Mathematical-Trading-Research
    GH_RESEARCH_TOKEN=YOUR_FINE_GRAINED_TOKEN
    GH_RESEARCH_SYNC_INTERVAL_SECONDS=300
    ```
