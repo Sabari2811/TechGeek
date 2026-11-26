@@ -77,3 +77,23 @@ def test_live_mode_is_refused_before_network(monkeypatch):
     monkeypatch.setattr(sync, "CONFIG", SimpleNamespace(mode="LIVE", live_enabled=lambda: False))
     with pytest.raises(sync.ResearchSyncError, match="PAPER-only"):
         sync.upload_batch("2026-11-26")
+
+
+def test_explicit_empty_state_does_not_load_persisted_cursor(tmp_path, monkeypatch):
+    monkeypatch.setattr(sync, "DATA_ROOT", tmp_path / ".quantnifty")
+    monkeypatch.setattr(sync, "STATE_PATH", tmp_path / "sync-state.json")
+    raw_dir = sync.DATA_ROOT / "raw"
+    raw_dir.mkdir(parents=True)
+    day = "2026-11-26"
+    raw_path = raw_dir / f"{day}.jsonl"
+    raw_path.write_text('{"ltp":123}\\n', encoding="utf-8")
+
+    # An explicit empty cursor means upload from byte zero, even if a saved
+    # cursor exists from an earlier run.
+    sync.STATE_PATH.write_text(json.dumps({"offsets": {raw_path.as_posix(): raw_path.stat().st_size}}), encoding="utf-8")
+    archive, next_state, source_bytes = sync.build_batch_archive(day, {})
+
+    assert source_bytes > 0
+    assert next_state["offsets"][raw_path.as_posix()] == raw_path.stat().st_size
+    with zipfile.ZipFile(BytesIO(archive)) as zf:
+        assert zf.read(f"raw/{day}.jsonl").decode().strip() == '{"ltp":123}'
