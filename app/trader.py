@@ -2,6 +2,8 @@ import asyncio
 import json
 import math
 from datetime import datetime
+import os
+import time
 from .config import CONFIG, IST
 from .models import MarketState, SignalAudit
 from .market import IndstocksClient, load_chain_into_state, extract_market_depth, summarize_market_depth_payload, quote_source_consistency
@@ -16,6 +18,7 @@ from .daily_reports import write_daily_report
 from .terminal import Terminal
 from .order_journal import enforce_startup_reconciliation, fetch_read_only_broker_reconciliation
 from .kill_switch import status as kill_switch_status
+from .research_sync import upload_batch
 
 
 async def next_expiry(client: IndstocksClient) -> str:
@@ -138,6 +141,8 @@ async def run():
     expiry = None
     risk_day = datetime.now(IST).date()
     reported_day = None
+    last_research_sync = 0.0
+    research_sync_interval = max(60, int(os.getenv('GH_RESEARCH_SYNC_INTERVAL_SECONDS', '300')))
 
     try:
         while True:
@@ -168,6 +173,12 @@ async def run():
                             f"| recorded_pnl=₹{summary['recorded_session_ledger_pnl']:,.2f}"
                         )
                         reported_day = today
+                        if os.getenv('GH_RESEARCH_TOKEN') and os.getenv('GH_RESEARCH_REPOSITORY'):
+                            try:
+                                result = await asyncio.to_thread(upload_batch, today.isoformat())
+                                print(f'PRIVATE RESEARCH UPLOAD: {result}')
+                            except Exception as sync_exc:
+                                print(f'PRIVATE RESEARCH UPLOAD FAILED: {type(sync_exc).__name__}: {sync_exc}')
                     except Exception as exc:
                         print(f"DAILY REPORT GENERATION FAILED: {type(exc).__name__}: {exc}")
                 Terminal.waiting(state.spot, "Outside market session. Run during 09:30–15:15 IST.")
@@ -179,6 +190,15 @@ async def run():
                     expiry = await next_expiry(client)
                 chain = await client.option_chain(expiry)
                 record_option_chain(chain, expiry=expiry)
+                if (os.getenv('GH_RESEARCH_TOKEN') and os.getenv('GH_RESEARCH_REPOSITORY')
+                        and time.monotonic() - last_research_sync >= research_sync_interval):
+                    try:
+                        result = await asyncio.to_thread(upload_batch, today.isoformat())
+                        print(f'PRIVATE RESEARCH UPLOAD: {result}')
+                        last_research_sync = time.monotonic()
+                    except Exception as sync_exc:
+                        # Research sync is best-effort and never changes trading/risk state.
+                        print(f'PRIVATE RESEARCH UPLOAD FAILED: {type(sync_exc).__name__}: {sync_exc}')
                 load_chain_into_state(state, chain)
                 save_today(state.spot_history, today, execution.closed_trades)
             except Exception as exc:
