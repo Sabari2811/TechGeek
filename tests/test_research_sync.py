@@ -96,4 +96,4 @@ def test_explicit_empty_state_does_not_load_persisted_cursor(tmp_path, monkeypat
     assert source_bytes > 0
     assert next_state["offsets"][raw_path.as_posix()] == raw_path.stat().st_size
     with zipfile.ZipFile(BytesIO(archive)) as zf:
-        assert zf.read(f"raw/{day}.jsonl").decode().strip() == '{"ltp":123}'
+        assert json.loads(zf.read(f"raw/{day}.jsonl").decode()) == {"ltp": 123}
