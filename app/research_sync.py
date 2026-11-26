@@ -36,6 +36,16 @@ class ResearchSyncError(RuntimeError):
 
 def _redact_text(raw: bytes) -> bytes:
     text = raw.decode("utf-8", errors="replace")
+    # Daily reports are pretty-printed JSON documents, not JSONL. Keep their
+    # summaries/analysis but omit raw arrays already shipped in incremental batches.
+    try:
+        document = json.loads(text)
+    except json.JSONDecodeError:
+        document = None
+    if isinstance(document, dict):
+        document.pop("raw_audit_events", None)
+        document.pop("raw_option_chain_snapshots", None)
+        return (json.dumps(_redact_value(document), ensure_ascii=False, indent=2) + "\n").encode("utf-8")
     lines = []
     for line in text.splitlines():
         try:
