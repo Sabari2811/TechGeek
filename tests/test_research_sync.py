@@ -86,7 +86,7 @@ def test_explicit_empty_state_does_not_load_persisted_cursor(tmp_path, monkeypat
     raw_dir.mkdir(parents=True)
     day = "2026-11-26"
     raw_path = raw_dir / f"{day}.jsonl"
-    raw_path.write_text('{"ltp":123}\\n', encoding="utf-8")
+    raw_path.write_text('{"ltp":123}\n', encoding="utf-8")
 
     # An explicit empty cursor means upload from byte zero, even if a saved
     # cursor exists from an earlier run.
