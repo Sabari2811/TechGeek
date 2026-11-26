@@ -26,7 +26,7 @@ API_ROOT = "https://api.github.com"
 SECRET_KEY_PARTS = ("token", "secret", "password", "authorization", "api_key", "apikey", "cookie")
 SECRET_PATTERNS = (
     (re.compile(r"(?i)\bBearer\s+[A-Za-z0-9._~+/=-]+"), "Bearer [REDACTED]"),
-    (re.compile(r"(?i)([?&](?:access_token|refresh_token|api_key|apikey|token|client_secret|password)=)[^&\\s]+"), r"\\1[REDACTED]"),
+    (re.compile(r"(?i)([?&](?:access_token|refresh_token|api_key|apikey|token|client_secret|password)=)[^&\s]+"), r"\1[REDACTED]"),
 )
 
 
@@ -47,7 +47,7 @@ def _redact_text(raw: bytes) -> bytes:
             lines.append(safe)
             continue
         lines.append(json.dumps(_redact_value(row), ensure_ascii=False, separators=(",", ":")))
-    return (("\\n".join(lines) + "\\n") if lines else "").encode("utf-8")
+    return (("\n".join(lines) + "\n") if lines else "").encode("utf-8")
 
 
 def _redact_value(value):
