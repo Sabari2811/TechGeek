@@ -228,12 +228,12 @@ def test_order_trades_uses_documented_get_body_and_validates_fills():
     async def scenario():
         client = IndstocksClient()
         client.http = FakeHttp(payload)
-        fills = await client.order_trades("ORD-123", "DERIVATIVE")
+        fills = await client.order_trades("DRV-123", "DERIVATIVE")
         assert len(fills) == 2
         assert client.http.methods == ["GET"]
         assert client.http.calls == [(
             "/order/trades",
-            {"json": {"order_id": "ORD-123", "segment": "DERIVATIVE"}},
+            {"json": {"order_id": "DRV-123", "segment": "DERIVATIVE"}},
         )]
         await client.close()
 
@@ -247,7 +247,7 @@ def test_order_trades_rejects_non_positive_fill_values():
         client = IndstocksClient()
         client.http = FakeHttp(payload)
         try:
-            await client.order_trades("ORD-123")
+            await client.order_trades("DRV-123")
         except RuntimeError as exc:
             assert "non-positive" in str(exc)
         else:
@@ -357,3 +357,20 @@ def test_quote_source_consistency_rejects_missing_bid_or_incomplete_depth():
     )
     assert ok is False
     assert reason == "five-level depth unavailable for quote comparison"
+
+    
+def test_order_trades_rejects_undocumented_numeric_order_id_without_http_call():
+    async def scenario():
+        client = IndstocksClient()
+        fake = FakeHttp({"status": "success", "data": []})
+        client.http = fake
+        try:
+            await client.order_trades("1", "DERIVATIVE")
+        except ValueError as exc:
+            assert "expected prefix DRV-, GTT-" in str(exc)
+        else:
+            raise AssertionError("numeric local IDs must not be sent to INDstocks")
+        assert fake.calls == []
+        await client.close()
+
+    asyncio.run(scenario())
