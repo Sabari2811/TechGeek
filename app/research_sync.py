@@ -47,13 +47,13 @@ def _redact_value(value):
     return value
 
 
-def _redact_text(raw: bytes) -> bytes:
+def _redact_text(raw: bytes, *, jsonl: bool = False) -> bytes:
     text = raw.decode("utf-8", errors="replace")
     try:
         document = json.loads(text)
     except json.JSONDecodeError:
         document = None
-    if isinstance(document, dict):
+    if isinstance(document, dict) and not jsonl:
         document.pop("raw_audit_events", None)
         document.pop("raw_option_chain_snapshots", None)
         return (json.dumps(_redact_value(document), ensure_ascii=False, indent=2) + "\n").encode("utf-8")
@@ -178,7 +178,7 @@ def build_batch_archive(
             raw, end = _read_new_bytes(path, old_offset, max_source_bytes)
             if not raw:
                 continue
-            safe = _redact_text(raw)
+            safe = _redact_text(raw, jsonl=path.suffix == ".jsonl")
             if not safe:
                 continue
             archive_name = str(path.relative_to(DATA_ROOT)).replace("\\", "/")
