@@ -47,8 +47,7 @@ local receive time is available.
 - This feature does not enable, submit, cancel, or reconcile broker orders.
 - Keep the persistent entry kill switch ON if unresolved order records or recovery
   warnings exist. Research upload does not override it.
-- Only raw, audit and report files are included. Credentials are redacted; local order
-  journal, open-position state, kill-switch state and `.env` are never uploaded.
+- Raw, audit, sanitised order-journal and report files are included. Broker order IDs in uploaded journals are replaced with per-file pseudonyms so related events remain linkable without publishing the original IDs. Credentials are redacted. Open-position state, kill-switch state, sync cursors and `.env` are never uploaded.
 - Each upload is a ZIP limited to 20 MiB. The upload cursor advances only after GitHub
   confirms success, so a failed upload is retried on a later cycle.
 - Upload is best-effort: a GitHub/network failure does not interrupt market monitoring

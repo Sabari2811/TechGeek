@@ -47,6 +47,40 @@ def _redact_value(value):
     return value
 
 
+def _redact_order_journal(raw: bytes) -> bytes:
+    """Sanitize broker order IDs while preserving within-file event correlation."""
+    text = raw.decode("utf-8", errors="replace")
+    aliases: dict[str, str] = {}
+    lines = []
+    for line in text.splitlines():
+        try:
+            row = json.loads(line)
+        except json.JSONDecodeError:
+            raise ResearchSyncError("Order journal contains an invalid JSONL record; upload refused.")
+        if not isinstance(row, dict):
+            raise ResearchSyncError("Order journal record is not a JSON object; upload refused.")
+        row = _redact_value(row)
+
+        def sanitize_order_ids(value):
+            if isinstance(value, dict):
+                for key, child in list(value.items()):
+                    normalized = str(key).lower()
+                    if normalized in {"order_id", "broker_order_id", "broker_orderid"} and child not in (None, ""):
+                        raw_id = str(child)
+                        if raw_id not in aliases:
+                            aliases[raw_id] = f"broker_order_{len(aliases) + 1:03d}"
+                        value[key] = aliases[raw_id]
+                    else:
+                        sanitize_order_ids(child)
+            elif isinstance(value, list):
+                for child in value:
+                    sanitize_order_ids(child)
+
+        sanitize_order_ids(row)
+        lines.append(json.dumps(row, ensure_ascii=False, separators=(",", ":")))
+    return (("\n".join(lines) + "\n") if lines else "").encode("utf-8")
+
+
 def _redact_text(raw: bytes, *, jsonl: bool = False) -> bytes:
     text = raw.decode("utf-8", errors="replace")
     try:
@@ -90,6 +124,7 @@ def _candidate_files(day: str) -> list[Path]:
     return [
         DATA_ROOT / "raw" / f"{day}.jsonl",
         DATA_ROOT / "audit" / f"{day}.jsonl",
+        DATA_ROOT / "orders" / f"{day}.jsonl",
         DATA_ROOT / "reports" / day / "daily_report.json",
         DATA_ROOT / "reports" / day / "analysis.md",
     ]
@@ -100,7 +135,7 @@ def discover_pending_dates() -> list[str]:
     days: set[str] = set()
     state = _load_state()
     offsets = state.get("offsets", {})
-    for folder in (DATA_ROOT / "raw", DATA_ROOT / "audit"):
+    for folder in (DATA_ROOT / "raw", DATA_ROOT / "audit", DATA_ROOT / "orders"):
         if folder.exists():
             for path in folder.glob("????-??-??.jsonl"):
                 if path.is_file() and path.stat().st_size:
@@ -178,7 +213,8 @@ def build_batch_archive(
             raw, end = _read_new_bytes(path, old_offset, max_source_bytes)
             if not raw:
                 continue
-            safe = _redact_text(raw, jsonl=path.suffix == ".jsonl")
+            safe = (_redact_order_journal(raw) if path.parent.name == "orders" else
+                    _redact_text(raw, jsonl=path.suffix == ".jsonl"))
             if not safe:
                 continue
             archive_name = str(path.relative_to(DATA_ROOT)).replace("\\", "/")
