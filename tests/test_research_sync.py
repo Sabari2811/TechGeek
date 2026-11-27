@@ -144,3 +144,27 @@ def test_non_jsonl_report_over_batch_limit_fails_without_truncation(tmp_path, mo
     (reports / "analysis.md").write_text("x" * 100, encoding="utf-8")
     with pytest.raises(sync.ResearchSyncError, match="non-JSONL report"):
         sync.build_batch_archive("2026-11-26", {}, max_source_bytes=50)
+
+
+
+def test_trailing_partial_jsonl_record_is_not_advanced(tmp_path, monkeypatch):
+    monkeypatch.setattr(sync, "DATA_ROOT", tmp_path / ".quantnifty")
+    raw = sync.DATA_ROOT / "raw"
+    raw.mkdir(parents=True)
+    day = "2026-11-27"
+    path = raw / f"{day}.jsonl"
+    path.write_bytes(b'{"complete":true}\\n{"partial":')
+    archive, state, source_bytes = sync.build_batch_archive(day, {})
+    assert source_bytes == len(b'{"complete":true}\\n')
+    assert state["offsets"][path.as_posix()] == len(b'{"complete":true}\\n')
+    with zipfile.ZipFile(BytesIO(archive)) as zf:
+        assert zf.read(f"raw/{day}.jsonl") == b'{"complete":true}\\n'
+
+
+def test_date_discovery_finds_report_directories(tmp_path, monkeypatch):
+    monkeypatch.setattr(sync, "DATA_ROOT", tmp_path / ".quantnifty")
+    monkeypatch.setattr(sync, "STATE_PATH", tmp_path / "sync-state.json")
+    report = sync.DATA_ROOT / "reports" / "2026-11-27"
+    report.mkdir(parents=True)
+    (report / "daily_report.json").write_text('{"summary":{}}', encoding="utf-8")
+    assert sync.discover_pending_dates() == ["2026-11-27"]
