@@ -130,7 +130,10 @@ def build_daily_report(day: date, include_raw: bool = True) -> dict:
 
 
 def write_daily_report(day: date) -> dict:
-    report = build_daily_report(day, include_raw=True)
+    # Raw snapshots and full audit history are already stored as JSONL evidence.
+    # Keep this convenience report compact; duplicating both datasets can create
+    # multi-hundred-megabyte files and block the incremental research uploader.
+    report = build_daily_report(day, include_raw=False)
     folder = REPORT_ROOT / day.isoformat()
     folder.mkdir(parents=True, exist_ok=True)
     (folder / "daily_report.json").write_text(

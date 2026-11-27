@@ -167,7 +167,13 @@ def test_date_discovery_finds_report_directories(tmp_path, monkeypatch):
     report = sync.DATA_ROOT / "reports" / "2026-11-27"
     report.mkdir(parents=True)
     (report / "daily_report.json").write_text('{"summary":{}}', encoding="utf-8")
+    (report / "analysis.md").write_text("# concise report\n", encoding="utf-8")
     assert sync.discover_pending_dates() == ["2026-11-27"]
+    archive, state, source_bytes = sync.build_batch_archive("2026-11-27", {})
+    assert source_bytes > 0
+    with zipfile.ZipFile(BytesIO(archive)) as zf:
+        assert "reports/2026-11-27/analysis.md" in zf.namelist()
+        assert "reports/2026-11-27/daily_report.json" not in zf.namelist()
 
 
 def test_order_journal_is_included_and_broker_ids_are_pseudonymized(tmp_path, monkeypatch):

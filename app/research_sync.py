@@ -125,7 +125,6 @@ def _candidate_files(day: str) -> list[Path]:
         DATA_ROOT / "raw" / f"{day}.jsonl",
         DATA_ROOT / "audit" / f"{day}.jsonl",
         DATA_ROOT / "orders" / f"{day}.jsonl",
-        DATA_ROOT / "reports" / day / "daily_report.json",
         DATA_ROOT / "reports" / day / "analysis.md",
     ]
 
