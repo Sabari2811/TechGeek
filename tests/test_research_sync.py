@@ -106,11 +106,11 @@ def test_pending_date_discovery_skips_fully_uploaded_dates(tmp_path, monkeypatch
     audit = sync.DATA_ROOT / "audit"
     audit.mkdir(parents=True)
     path = audit / "2026-11-25.jsonl"
-    path.write_text('{"event":"done"}\\n', encoding="utf-8")
+    path.write_text('{"event":"done"}\n', encoding="utf-8")
     size = path.stat().st_size
     sync.STATE_PATH.write_text(json.dumps({"offsets": {path.as_posix(): size}}), encoding="utf-8")
     assert sync.discover_pending_dates() == []
-    path.write_text(path.read_text(encoding="utf-8") + '{"event":"new"}\\n', encoding="utf-8")
+    path.write_text(path.read_text(encoding="utf-8") + '{"event":"new"}\n', encoding="utf-8")
     assert sync.discover_pending_dates() == ["2026-11-25"]
 
 
@@ -122,7 +122,7 @@ def test_large_jsonl_is_split_only_at_record_boundaries(tmp_path, monkeypatch):
     day = "2026-11-26"
     path = raw / f"{day}.jsonl"
     records = [json.dumps({"record": i, "payload": "x" * 40}) for i in range(8)]
-    path.write_text("\\n".join(records) + "\\n", encoding="utf-8")
+    path.write_text("\n".join(records) + "\n", encoding="utf-8")
 
     first, first_state, first_bytes = sync.build_batch_archive(day, {}, max_source_bytes=180)
     second, second_state, second_bytes = sync.build_batch_archive(day, first_state, max_source_bytes=180)
@@ -153,12 +153,12 @@ def test_trailing_partial_jsonl_record_is_not_advanced(tmp_path, monkeypatch):
     raw.mkdir(parents=True)
     day = "2026-11-27"
     path = raw / f"{day}.jsonl"
-    path.write_bytes(b'{"complete":true}\\n{"partial":')
+    path.write_bytes(b'{"complete":true}\n{"partial":')
     archive, state, source_bytes = sync.build_batch_archive(day, {})
-    assert source_bytes == len(b'{"complete":true}\\n')
-    assert state["offsets"][path.as_posix()] == len(b'{"complete":true}\\n')
+    assert source_bytes == len(b'{"complete":true}\n')
+    assert state["offsets"][path.as_posix()] == len(b'{"complete":true}\n')
     with zipfile.ZipFile(BytesIO(archive)) as zf:
-        assert zf.read(f"raw/{day}.jsonl") == b'{"complete":true}\\n'
+        assert zf.read(f"raw/{day}.jsonl") == b'{"complete":true}\n'
 
 
 def test_date_discovery_finds_report_directories(tmp_path, monkeypatch):
