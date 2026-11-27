@@ -8,7 +8,7 @@ import math
 import re
 from datetime import datetime
 from pathlib import Path
-from .config import IST
+from .config import IST\nfrom .storage import DATA_ROOT
 
 RAW_ROOT = Path(".quantnifty/raw")
 AUDIT_ROOT = Path(".quantnifty/audit")
