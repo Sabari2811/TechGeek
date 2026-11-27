@@ -7,6 +7,7 @@ import time
 from .config import CONFIG, IST
 from .models import MarketState, SignalAudit
 from .market import IndstocksClient, load_chain_into_state, extract_market_depth, summarize_market_depth_payload, quote_source_consistency
+from .strike_selection import select_strategy_option_chain
 from .math_engine import QuantEngine
 from .microstructure import MicrostructureEngine, MicrostructureState
 from .risk import RiskManager, calculate_stop_target, cap_quantity_to_lots, daily_risk_check
@@ -199,7 +200,10 @@ async def run():
                 if expiry is None:
                     expiry = await next_expiry(client)
                 chain = await client.option_chain(expiry)
+                # Preserve the complete provider response for raw research first.
                 record_option_chain(chain, expiry=expiry)
+                strategy_chain, strike_selection = select_strategy_option_chain(chain)
+                record_audit_event("strike_universe_selected", strike_selection)
                 if (os.getenv('GH_RESEARCH_TOKEN') and os.getenv('GH_RESEARCH_REPOSITORY')
                         and time.monotonic() - last_research_sync >= research_sync_interval):
                     last_research_sync = time.monotonic()
@@ -210,7 +214,7 @@ async def run():
                     except Exception as sync_exc:
                         # Research sync is best-effort and never changes trading/risk state.
                         print(f'PRIVATE RESEARCH UPLOAD FAILED: {type(sync_exc).__name__}: {sync_exc}')
-                load_chain_into_state(state, chain)
+                load_chain_into_state(state, strategy_chain)
                 save_today(state.spot_history, today, execution.closed_trades)
             except Exception as exc:
                 Terminal.waiting(state.spot, f"Data feed warning: {exc}")

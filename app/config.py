@@ -22,7 +22,7 @@ class Config:
     max_spread_pct: float = float(os.getenv("MAX_SPREAD_PCT", "0.04"))
     max_quote_source_diff_pct: float = float(os.getenv("MAX_QUOTE_SOURCE_DIFF_PCT", "0.005"))
     stale_seconds: float = float(os.getenv("STALE_SECONDS", "3"))
-    strike_count: int = int(os.getenv("STRIKE_COUNT", "10"))
+    strike_count: int = 5
     poll_seconds: float = float(os.getenv("POLL_SECONDS", "2"))
     risk_free_rate: float = float(os.getenv("RISK_FREE_RATE", "0.06"))
     dividend_yield: float = float(os.getenv("DIVIDEND_YIELD", "0.01"))

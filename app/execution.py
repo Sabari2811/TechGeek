@@ -194,6 +194,35 @@ class ExecutionEngine:
                 raise RuntimeError(
                     "Open PAPER position could not be durably persisted; entry kill switch enabled"
                 ) from exc
+        if CONFIG.mode == "PAPER" and not CONFIG.live_enabled():
+            record_audit_event("paper_order_simulated", {
+                "side": "BUY",
+                "simulated": True,
+                "broker_order_submitted": False,
+                "fill_model": "BUY_AT_OPTION_ASK",
+                "price_basis": "ASK",
+                "symbol": signal.symbol,
+                "security_id": signal.security_id,
+                "option_type": signal.option_type,
+                "strike": signal.strike,
+                "quantity": qty,
+                "fill_price": entry,
+                "notional": entry * qty,
+                "position_opened_at": self.position.opened_at.isoformat(),
+                "stop_price": signal.stop,
+                "target_price": signal.target,
+                "probability": signal.probability,
+                "fair_value": signal.fair_value,
+                "expected_value": signal.expected_value,
+                "net_expected_value": signal.net_expected_value,
+                "score": signal.score,
+                "score_components": signal.score_components,
+                "market_phase": signal.market_phase,
+                "direction_bias": signal.direction_bias,
+                "signal_reason": signal.reason,
+                "checks": signal.checks,
+                "charges_status": "NOT_ESTIMATED",
+            })
         record_audit_event("entry_filled", {
             "symbol": signal.symbol,
             "security_id": signal.security_id,
@@ -237,6 +266,25 @@ class ExecutionEngine:
         p.exit_proceeds += fill_price * traded_qty
         p.quantity -= traded_qty
         p.exit_reason = reason
+        if CONFIG.mode == "PAPER" and not CONFIG.live_enabled():
+            record_audit_event("paper_order_simulated", {
+                "side": "SELL",
+                "simulated": True,
+                "broker_order_submitted": False,
+                "fill_model": "SELL_AT_FRESH_BID" if price_basis == "BID" else "SELL_AT_LTP_ESTIMATE",
+                "price_basis": price_basis,
+                "symbol": p.signal.symbol,
+                "security_id": p.signal.security_id,
+                "option_type": p.signal.option_type,
+                "strike": p.signal.strike,
+                "quantity": traded_qty,
+                "fill_price": fill_price,
+                "notional": fill_price * traded_qty,
+                "exit_reason": reason,
+                "position_opened_at": p.opened_at.isoformat(),
+                "gross_pnl_for_fill": (fill_price - p.entry_price) * traded_qty,
+                "charges_status": "NOT_ESTIMATED",
+            })
         record_audit_event("exit_fill", {
             "symbol": p.signal.symbol,
             "security_id": p.signal.security_id,
