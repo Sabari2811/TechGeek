@@ -260,13 +260,19 @@ def upload_pending_batches(max_batches: int = DEFAULT_MAX_BATCHES_PER_RUN) -> di
     if max_batches < 1:
         raise ValueError("max_batches must be at least 1")
     results = []
-    for _ in range(max_batches):
-        pending = discover_pending_dates()
+    blocked_dates: set[str] = set()
+    while len(results) < max_batches:
+        pending = [day for day in discover_pending_dates() if day not in blocked_dates]
         if not pending:
             break
-        result = _upload_one(pending[0], token, repository)
+        day = pending[0]
+        result = _upload_one(day, token, repository)
         if result["status"] != "uploaded":
-            break
+            # A trailing partial JSONL line can temporarily have no complete
+            # record. Skip that date for this invocation so it cannot starve
+            # other historical dates; retry it on the next sync cycle.
+            blocked_dates.add(day)
+            continue
         results.append(result)
     return {
         "status": "uploaded" if results else "nothing_new",
