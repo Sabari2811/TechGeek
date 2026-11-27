@@ -247,7 +247,7 @@ def test_order_trades_rejects_non_positive_fill_values():
         client = IndstocksClient()
         client.http = FakeHttp(payload)
         try:
-            await client.order_trades("ORD-123")
+            await client.order_trades("DRV-123")
         except RuntimeError as exc:
             assert "non-positive" in str(exc)
         else:
