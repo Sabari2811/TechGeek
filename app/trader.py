@@ -18,7 +18,7 @@ from .daily_reports import write_daily_report
 from .terminal import Terminal
 from .order_journal import enforce_startup_reconciliation, fetch_read_only_broker_reconciliation
 from .kill_switch import status as kill_switch_status
-from .research_sync import upload_batch
+from .research_sync import upload_pending_batches
 
 
 async def next_expiry(client: IndstocksClient) -> str:
@@ -163,6 +163,16 @@ async def run():
 
             Terminal.set_trade_state(execution.position, execution.closed_trades, len(execution.closed_trades) + (1 if execution.position else 0))
             if not CONFIG.session_active():
+                # Keep draining locally captured research batches after market close.
+                # This is a read-only upload path and does not require market data.
+                if (os.getenv('GH_RESEARCH_TOKEN') and os.getenv('GH_RESEARCH_REPOSITORY')
+                        and time.monotonic() - last_research_sync >= research_sync_interval):
+                    last_research_sync = time.monotonic()
+                    try:
+                        result = await asyncio.to_thread(upload_pending_batches)
+                        print(f'PRIVATE RESEARCH UPLOAD: {result}')
+                    except Exception as sync_exc:
+                        print(f'PRIVATE RESEARCH UPLOAD FAILED: {type(sync_exc).__name__}: {sync_exc}')
                 if datetime.now(IST).time() > CONFIG.end_time and reported_day != today:
                     try:
                         report = write_daily_report(today)
@@ -175,7 +185,7 @@ async def run():
                         reported_day = today
                         if os.getenv('GH_RESEARCH_TOKEN') and os.getenv('GH_RESEARCH_REPOSITORY'):
                             try:
-                                result = await asyncio.to_thread(upload_batch, today.isoformat())
+                                result = await asyncio.to_thread(upload_pending_batches)
                                 print(f'PRIVATE RESEARCH UPLOAD: {result}')
                             except Exception as sync_exc:
                                 print(f'PRIVATE RESEARCH UPLOAD FAILED: {type(sync_exc).__name__}: {sync_exc}')
@@ -194,7 +204,7 @@ async def run():
                         and time.monotonic() - last_research_sync >= research_sync_interval):
                     last_research_sync = time.monotonic()
                     try:
-                        result = await asyncio.to_thread(upload_batch, today.isoformat())
+                        result = await asyncio.to_thread(upload_pending_batches)
                         print(f'PRIVATE RESEARCH UPLOAD: {result}')
                         last_research_sync = time.monotonic()
                     except Exception as sync_exc:
