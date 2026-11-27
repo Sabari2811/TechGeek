@@ -9,7 +9,9 @@ from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-JOURNAL_ROOT = Path(".quantnifty/orders")
+from .storage import DATA_ROOT
+
+JOURNAL_ROOT = DATA_ROOT / "orders"
 IST = ZoneInfo("Asia/Kolkata")
 
 

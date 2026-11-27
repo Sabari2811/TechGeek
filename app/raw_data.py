@@ -9,9 +9,10 @@ import re
 from datetime import datetime
 from pathlib import Path
 from .config import IST
+from .storage import DATA_ROOT
 
-RAW_ROOT = Path(".quantnifty/raw")
-AUDIT_ROOT = Path(".quantnifty/audit")
+RAW_ROOT = DATA_ROOT / "raw"
+AUDIT_ROOT = DATA_ROOT / "audit"
 
 
 _SECRET_KEY_FRAGMENTS = (

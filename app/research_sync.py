@@ -14,9 +14,9 @@ from pathlib import Path
 import httpx
 
 from .config import CONFIG, IST
+from .storage import DATA_ROOT, CAMPAIGN_ID
 
-STATE_PATH = Path(".quantnifty/github_sync_state.json")
-DATA_ROOT = Path(".quantnifty")
+STATE_PATH = DATA_ROOT / "github_sync_state.json"
 MAX_ARCHIVE_BYTES = 20 * 1024 * 1024
 MAX_SOURCE_BYTES = 2 * 1024 * 1024
 DEFAULT_MAX_BATCHES_PER_RUN = 5
@@ -125,6 +125,7 @@ def _candidate_files(day: str) -> list[Path]:
         DATA_ROOT / "raw" / f"{day}.jsonl",
         DATA_ROOT / "audit" / f"{day}.jsonl",
         DATA_ROOT / "orders" / f"{day}.jsonl",
+        DATA_ROOT / "paper_trades" / f"{day}.jsonl",
         DATA_ROOT / "reports" / day / "analysis.md",
     ]
 
@@ -134,7 +135,7 @@ def discover_pending_dates() -> list[str]:
     days: set[str] = set()
     state = _load_state()
     offsets = state.get("offsets", {})
-    for folder in (DATA_ROOT / "raw", DATA_ROOT / "audit", DATA_ROOT / "orders"):
+    for folder in (DATA_ROOT / "raw", DATA_ROOT / "audit", DATA_ROOT / "orders", DATA_ROOT / "paper_trades"):
         if folder.exists():
             for path in folder.glob("????-??-??.jsonl"):
                 if path.is_file() and path.stat().st_size:
@@ -262,7 +263,7 @@ def _upload_one(day: str, token: str, repository: str) -> dict:
     if not payload:
         return {"status": "nothing_new", "trading_date": day, "source_bytes": 0}
     stamp = datetime.now(IST).strftime("%H%M%S")
-    path = f"batches/{day}/paper-research-{stamp}-{time.time_ns()}.zip"
+    path = f"campaigns/{CAMPAIGN_ID}/batches/{day}/paper-research-{stamp}-{time.time_ns()}.zip"
     with httpx.Client(headers=_github_headers(token), timeout=60.0) as client:
         _verify_private_repo(client, repository)
         response = client.put(

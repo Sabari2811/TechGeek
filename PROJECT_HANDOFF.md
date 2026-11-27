@@ -368,3 +368,17 @@ No live order routing was enabled or used during these changes.
 - Future daily reports omit duplicated raw arrays but retain summaries, selected candidate/rejection/microstructure evidence, fill reconciliation and raw-data manifest. Raw JSONL is still retained locally and synced incrementally.
 - Regression coverage confirms report directories remain discoverable, analysis.md is included, and daily_report.json is excluded.
 - No changes to strategy, entry gates, kill switch, order journal, or broker routing. Existing unresolved startup journal hold remains in force.
+
+
+## Fresh PAPER research campaign — 2026-11-30 start
+
+- Campaign ID: `2026-11-30-paper`; intended first market session: Monday, 30 November 2026.
+- The campaign uses an isolated local root configured by `QUANTNIFTY_DATA_ROOT`, with a separate campaign ID configured by `QUANTNIFTY_CAMPAIGN_ID`.
+- Order journal, kill switch, raw option-chain data, audit events, session/position state, learner state, daily reports and research-sync cursors are scoped to that root. Existing `.quantnifty/` data is preserved in place and is not imported into the new campaign.
+- Research uploads are stored under `campaigns/<campaign_id>/batches/<date>/` in the configured private research repository; each batch manifest includes the campaign ID.
+- Startup explicitly refuses non-PAPER mode or live routing. A legacy `.quantnifty/open_position.json` blocks isolated campaign startup and must be reviewed rather than silently ignored.
+- PAPER simulated BUY/SELL fills continue to use the existing simulation path; BUY fills are based on option ASK, SELL fills on fresh BID or explicitly labelled LTP estimate. No broker order is submitted in PAPER mode.
+- Campaign startup emits a `paper_campaign_started` audit event. The six-month research objective is to retain raw market snapshots, full decision/rejection/microstructure evidence, simulated order/fill/exit journal, stop/target, risk, P&L and post-market reports for later walk-forward and strategy comparison.
+- The old ten unresolved journal records are legacy evidence only and are not automatically validated, reconciled, deleted or imported into the campaign. Existing local files remain untouched.
+- Safety invariant: live order routing remains disabled for this campaign; strategy gates, five-level microstructure confirmation, one-lot cap and risk controls are unchanged.
+- Before Monday: set local `.env` values from the campaign section in `.env.example`, run full tests, confirm no legacy open-position file exists, verify the private research repository setting, and perform a read-only startup check. Do not manually edit old journal rows.

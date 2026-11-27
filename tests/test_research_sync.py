@@ -211,3 +211,20 @@ def test_pending_date_discovery_includes_order_journals(tmp_path, monkeypatch):
     orders.mkdir(parents=True)
     (orders / "2026-10-22.jsonl").write_text('{"event":"intent"}\n', encoding="utf-8")
     assert sync.discover_pending_dates() == ["2026-10-22"]
+
+
+def test_paper_trade_journal_is_included_in_research_batch(tmp_path, monkeypatch):
+    monkeypatch.setattr(sync, "DATA_ROOT", tmp_path / ".quantnifty")
+    monkeypatch.setattr(sync, "STATE_PATH", tmp_path / "sync-state.json")
+    folder = sync.DATA_ROOT / "paper_trades"
+    folder.mkdir(parents=True)
+    day = "2026-11-30"
+    (folder / f"{day}.jsonl").write_text(
+        json.dumps({"event": "paper_entry_filled", "simulated": True, "details": {"side": "BUY"}}) + "\n",
+        encoding="utf-8",
+    )
+    archive, _, source_bytes = sync.build_batch_archive(day, {})
+    assert source_bytes > 0
+    with zipfile.ZipFile(BytesIO(archive)) as zf:
+        rows = zf.read(f"paper_trades/{day}.jsonl").decode()
+    assert "paper_entry_filled" in rows

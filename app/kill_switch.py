@@ -9,7 +9,9 @@ import os
 from datetime import datetime
 from pathlib import Path
 
-KILL_SWITCH_PATH = Path(".quantnifty/kill_switch.json")
+from .storage import DATA_ROOT
+
+KILL_SWITCH_PATH = DATA_ROOT / "kill_switch.json"
 
 
 def status() -> tuple[bool, str]:
