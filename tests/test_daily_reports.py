@@ -29,13 +29,25 @@ def test_daily_report_includes_raw_audit_and_manifest(tmp_path, monkeypatch):
         {"contracts": [{"symbol": "NIFTY"}]},
         timestamp=datetime(2026, 11, 3, 10, 0, tzinfo=ZoneInfo("Asia/Kolkata")),
     )
-    report = daily_reports.write_daily_report(day)
 
+    # The explicit raw report path must continue to include sanitised raw evidence.
+    raw_report = daily_reports.build_daily_report(day, include_raw=True)
+    assert raw_report["summary"]["signal_rejection_cycles"] == 1
+    assert raw_report["summary"]["option_chain_snapshots"] == 1
+    assert raw_report["raw_audit_events"][0]["payload"]["api_token"] == "[REDACTED]"
+
+    # The normal on-disk report stays compact; raw evidence remains in JSONL.
+    report = daily_reports.write_daily_report(day)
     assert report["summary"]["signal_rejection_cycles"] == 1
     assert report["summary"]["option_chain_snapshots"] == 1
-    assert report["raw_audit_events"][0]["payload"]["api_token"] == "[REDACTED]"
-    assert (reports / day.isoformat() / "daily_report.json").exists()
+    assert report["raw_audit_events"] is None
+    assert report["raw_option_chain_snapshots"] is None
+    report_path = reports / day.isoformat() / "daily_report.json"
+    assert report_path.exists()
     assert (reports / day.isoformat() / "analysis.md").exists()
+    saved_report = json.loads(report_path.read_text(encoding="utf-8"))
+    assert saved_report["raw_audit_events"] is None
+    assert saved_report["raw_option_chain_snapshots"] is None
 
 
 def test_daily_report_includes_closed_session_ledger_trade(tmp_path, monkeypatch):
