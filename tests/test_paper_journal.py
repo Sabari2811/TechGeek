@@ -11,7 +11,8 @@ def test_paper_trade_journal_records_campaign_and_simulated_fill(tmp_path, monke
         "paper_entry_filled",
         {"side": "BUY", "fill_price": 125.5, "quantity": 65, "stop_price": 110, "target_price": 155},
     )
-    rows = [json.loads(line) for line in (tmp_path / "2026-11-27.jsonl").read_text().splitlines()]
+    journal = next(tmp_path.glob("*.jsonl"))
+    rows = [json.loads(line) for line in journal.read_text().splitlines()]
     assert rows[0]["event"] == "paper_entry_filled"
     assert rows[0]["simulated"] is True
     assert rows[0]["broker_order_submitted"] is False
