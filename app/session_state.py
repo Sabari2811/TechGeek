@@ -6,10 +6,10 @@ import os
 from datetime import date, datetime
 from pathlib import Path
 
-from .models import TradeRecord
+from .models import TradeRecord\nfrom .storage import DATA_ROOT
 
 
-STATE_PATH = Path(".quantnifty/session_state.json")
+STATE_PATH = DATA_ROOT / "session_state.json"
 MAX_POINTS = 600
 MAX_TRADES = 100
 
@@ -121,7 +121,7 @@ def save_today(prices: list[float], today: date | None = None,
 
 
 # Open PAPER position state is kept separate from the daily spot/trade ledger.
-OPEN_POSITION_PATH = Path(".quantnifty/open_position.json")
+OPEN_POSITION_PATH = DATA_ROOT / "open_position.json"
 
 
 def _position_to_dict(position) -> dict:
