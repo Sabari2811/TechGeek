@@ -345,7 +345,7 @@ No live order routing was enabled or used during these changes.
 - Added automatic discovery of local raw, audit and report trading dates with pending bytes, oldest-date-first. Fully uploaded files are skipped using durable byte cursors.
 - Added bounded JSONL batches (2 MiB source bytes per batch, complete-record boundaries) and a maximum of five successful uploads per sync invocation. Each successful upload advances its cursor only after GitHub confirms the Contents API write.
 - Kept the 20 MiB compressed ZIP guard. Non-JSONL reports larger than the source-batch limit fail closed without advancing cursors; oversized individual JSONL records remain subject to the compressed ZIP cap.
-- Updated the five-minute and post-market paths to call the pending-date uploader, so stopping the app pauses collection/sync and restarting PAPER mode resumes backfill.
+- Updated the five-minute, post-market and after-hours idle paths to call the pending-date uploader, so backfill continues every configured interval while the process remains running; stopping the app pauses collection/sync and restarting PAPER mode resumes backfill.
 - Added tests for cursor-aware date discovery, complete-line chunking and safe refusal of oversized report files.
 - Existing PAPER-only guard, private-repository verification, credential redaction, local-only state, order journal exclusion, kill-switch and live-routing restrictions are unchanged.
 - Validation still pending on the exact PR head: GitHub Actions matrix and local Windows test run. Do not claim historical September data has been uploaded until the backfill actually progresses; this implementation processes at most five chunks per invocation.
