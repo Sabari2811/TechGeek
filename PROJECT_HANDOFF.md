@@ -350,3 +350,12 @@ No live order routing was enabled or used during these changes.
 - Existing PAPER-only guard, private-repository verification, credential redaction, local-only state, order journal exclusion, kill-switch and live-routing restrictions are unchanged.
 - Validation still pending on the exact PR head: GitHub Actions matrix and local Windows test run. Do not claim historical September data has been uploaded until the backfill actually progresses; this implementation processes at most five chunks per invocation.
 - Operational note: use Ctrl+C once for normal stop. Do not force-close the process while it may be writing local capture files.
+
+
+## 2026-11-27 — ATM 16-contract universe and explicit PAPER fill audit (PR pending)
+
+- Added a deterministic strategy selector: CE uses five listed strikes below nearest ATM, ATM, and two above; PE uses two below, ATM, and five above. The ATM strike is shared. Exactly 8 CE + 8 PE = 16 contracts are passed to the mathematical engine.
+- The INDstocks option-chain API documents `strike_count` as the number of strikes on each side of ATM. Requesting five each side supplies the 11-strike ladder needed by the asymmetric selector. Full provider responses are still captured before filtering; the selected strike universe is recorded as an audit event.
+- Added explicit `paper_order_simulated` audit events for simulated BUY-at-ASK and SELL-at-fresh-BID (or labelled LTP estimate) fills, including contract, quantity, price, notional, stop/target, EV/probability, score, strategy reason, checks, exit reason and charges-status disclosure. These events flow through the existing private research archive uploader.
+- PAPER simulation continues to use the existing kill switch, startup unresolved-order hold, position persistence, daily risk limits, one-lot cap, stale quote checks and five-level microstructure gate. No unresolved journal item is auto-reconciled and no real-money order routing is enabled.
+- Pending validation: GitHub Actions matrix and user's Windows-local run. The current ten unresolved journal items remain a hard entry block until independently reconciled.
