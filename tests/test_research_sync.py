@@ -220,7 +220,7 @@ def test_paper_trade_journal_is_included_in_research_batch(tmp_path, monkeypatch
     folder.mkdir(parents=True)
     day = "2026-11-30"
     (folder / f"{day}.jsonl").write_text(
-        json.dumps({"event": "paper_entry_filled", "simulated": True, "details": {"side": "BUY"}}) + "\\n",
+        json.dumps({"event": "paper_entry_filled", "simulated": True, "details": {"side": "BUY"}}) + "\n",
         encoding="utf-8",
     )
     archive, _, source_bytes = sync.build_batch_archive(day, {})
