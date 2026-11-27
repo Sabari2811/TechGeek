@@ -19,3 +19,6 @@ def test_campaign_id_rejects_unsafe_values(monkeypatch, campaign_id):
     monkeypatch.setenv("QUANTNIFTY_CAMPAIGN_ID", campaign_id)
     with pytest.raises(ValueError, match="QUANTNIFTY_CAMPAIGN_ID"):
         importlib.reload(storage)
+    monkeypatch.setenv("QUANTNIFTY_DATA_ROOT", ".quantnifty")
+    monkeypatch.setenv("QUANTNIFTY_CAMPAIGN_ID", "legacy")
+    importlib.reload(storage)
