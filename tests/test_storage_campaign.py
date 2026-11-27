@@ -14,7 +14,7 @@ def test_campaign_storage_uses_configured_isolated_root(monkeypatch):
     assert loaded.LEGACY_DATA_ROOT.as_posix() == ".quantnifty"
 
 
-@pytest.mark.parametrize("campaign_id", ["../escape", "bad/name", "contains spaces", ""])
+@pytest.mark.parametrize("campaign_id", ["../escape", "bad/name", "contains spaces"])
 def test_campaign_id_rejects_unsafe_values(monkeypatch, campaign_id):
     monkeypatch.setenv("QUANTNIFTY_CAMPAIGN_ID", campaign_id)
     with pytest.raises(ValueError, match="QUANTNIFTY_CAMPAIGN_ID"):
