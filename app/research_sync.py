@@ -125,6 +125,7 @@ def _candidate_files(day: str) -> list[Path]:
         DATA_ROOT / "raw" / f"{day}.jsonl",
         DATA_ROOT / "audit" / f"{day}.jsonl",
         DATA_ROOT / "orders" / f"{day}.jsonl",
+        DATA_ROOT / "paper_trades" / f"{day}.jsonl",
         DATA_ROOT / "reports" / day / "analysis.md",
     ]
 
@@ -134,7 +135,7 @@ def discover_pending_dates() -> list[str]:
     days: set[str] = set()
     state = _load_state()
     offsets = state.get("offsets", {})
-    for folder in (DATA_ROOT / "raw", DATA_ROOT / "audit", DATA_ROOT / "orders"):
+    for folder in (DATA_ROOT / "raw", DATA_ROOT / "audit", DATA_ROOT / "orders", DATA_ROOT / "paper_trades"):
         if folder.exists():
             for path in folder.glob("????-??-??.jsonl"):
                 if path.is_file() and path.stat().st_size:
