@@ -163,6 +163,16 @@ async def run():
 
             Terminal.set_trade_state(execution.position, execution.closed_trades, len(execution.closed_trades) + (1 if execution.position else 0))
             if not CONFIG.session_active():
+                # Keep draining locally captured research batches after market close.
+                # This is a read-only upload path and does not require market data.
+                if (os.getenv('GH_RESEARCH_TOKEN') and os.getenv('GH_RESEARCH_REPOSITORY')
+                        and time.monotonic() - last_research_sync >= research_sync_interval):
+                    last_research_sync = time.monotonic()
+                    try:
+                        result = await asyncio.to_thread(upload_pending_batches)
+                        print(f'PRIVATE RESEARCH UPLOAD: {result}')
+                    except Exception as sync_exc:
+                        print(f'PRIVATE RESEARCH UPLOAD FAILED: {type(sync_exc).__name__}: {sync_exc}')
                 if datetime.now(IST).time() > CONFIG.end_time and reported_day != today:
                     try:
                         report = write_daily_report(today)
