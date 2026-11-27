@@ -6,7 +6,8 @@ import os
 from datetime import date, datetime
 from pathlib import Path
 
-from .models import TradeRecord\nfrom .storage import DATA_ROOT
+from .models import TradeRecord
+from .storage import DATA_ROOT
 
 
 STATE_PATH = DATA_ROOT / "session_state.json"
