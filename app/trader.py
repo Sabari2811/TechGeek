@@ -18,7 +18,7 @@ from .daily_reports import write_daily_report
 from .terminal import Terminal
 from .order_journal import enforce_startup_reconciliation, fetch_read_only_broker_reconciliation
 from .kill_switch import status as kill_switch_status
-from .research_sync import upload_batch
+from .research_sync import upload_pending_batches
 
 
 async def next_expiry(client: IndstocksClient) -> str:
@@ -175,7 +175,7 @@ async def run():
                         reported_day = today
                         if os.getenv('GH_RESEARCH_TOKEN') and os.getenv('GH_RESEARCH_REPOSITORY'):
                             try:
-                                result = await asyncio.to_thread(upload_batch, today.isoformat())
+                                result = await asyncio.to_thread(upload_pending_batches)
                                 print(f'PRIVATE RESEARCH UPLOAD: {result}')
                             except Exception as sync_exc:
                                 print(f'PRIVATE RESEARCH UPLOAD FAILED: {type(sync_exc).__name__}: {sync_exc}')
