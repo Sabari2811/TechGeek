@@ -168,3 +168,40 @@ def test_date_discovery_finds_report_directories(tmp_path, monkeypatch):
     report.mkdir(parents=True)
     (report / "daily_report.json").write_text('{"summary":{}}', encoding="utf-8")
     assert sync.discover_pending_dates() == ["2026-11-27"]
+
+
+def test_order_journal_is_included_and_broker_ids_are_pseudonymized(tmp_path, monkeypatch):
+    monkeypatch.setattr(sync, "DATA_ROOT", tmp_path / ".quantnifty")
+    monkeypatch.setattr(sync, "STATE_PATH", tmp_path / "sync-state.json")
+    orders = sync.DATA_ROOT / "orders"
+    orders.mkdir(parents=True)
+    day = "2026-10-22"
+    path = orders / f"{day}.jsonl"
+    rows = [
+        {"event": "broker_order_id_received", "client_order_ref": "quantnifty/exit-a",
+         "details": {"order_id": "sensitive-123", "response_status": "PENDING"}},
+        {"event": "terminal_filled", "client_order_ref": "quantnifty/exit-a",
+         "details": {"order_id": "sensitive-123", "traded_quantity": 2, "traded_price": 190.0}},
+    ]
+    path.write_text("\n".join(json.dumps(row) for row in rows) + "\n", encoding="utf-8")
+
+    archive, state, source_bytes = sync.build_batch_archive(day, {})
+    assert source_bytes == path.stat().st_size
+    with zipfile.ZipFile(BytesIO(archive)) as zf:
+        uploaded = zf.read(f"orders/{day}.jsonl").decode().splitlines()
+    parsed = [json.loads(line) for line in uploaded]
+    aliases = [row["details"]["order_id"] for row in parsed]
+    assert aliases == ["broker_order_001", "broker_order_001"]
+    assert "sensitive-123" not in "\n".join(uploaded)
+    assert parsed[0]["client_order_ref"] == "quantnifty/exit-a"
+    assert parsed[1]["details"]["traded_quantity"] == 2
+    assert state["offsets"][path.as_posix()] == path.stat().st_size
+
+
+def test_pending_date_discovery_includes_order_journals(tmp_path, monkeypatch):
+    monkeypatch.setattr(sync, "DATA_ROOT", tmp_path / ".quantnifty")
+    monkeypatch.setattr(sync, "STATE_PATH", tmp_path / "sync-state.json")
+    orders = sync.DATA_ROOT / "orders"
+    orders.mkdir(parents=True)
+    (orders / "2026-10-22.jsonl").write_text('{"event":"intent"}\n', encoding="utf-8")
+    assert sync.discover_pending_dates() == ["2026-10-22"]
