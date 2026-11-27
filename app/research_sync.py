@@ -13,10 +13,10 @@ from pathlib import Path
 
 import httpx
 
-from .config import CONFIG, IST\nfrom .storage import DATA_ROOT, CAMPAIGN_ID
+from .config import CONFIG, IST
+from .storage import DATA_ROOT, CAMPAIGN_ID
 
-STATE_PATH = Path(".quantnifty/github_sync_state.json")
-DATA_ROOT = Path(".quantnifty")
+STATE_PATH = DATA_ROOT / "github_sync_state.json"
 MAX_ARCHIVE_BYTES = 20 * 1024 * 1024
 MAX_SOURCE_BYTES = 2 * 1024 * 1024
 DEFAULT_MAX_BATCHES_PER_RUN = 5
