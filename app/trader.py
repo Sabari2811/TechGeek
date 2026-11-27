@@ -20,6 +20,7 @@ from .terminal import Terminal
 from .order_journal import enforce_startup_reconciliation, fetch_read_only_broker_reconciliation
 from .kill_switch import status as kill_switch_status
 from .research_sync import upload_pending_batches
+from .storage import DATA_ROOT, CAMPAIGN_ID, LEGACY_DATA_ROOT
 
 
 async def next_expiry(client: IndstocksClient) -> str:
@@ -32,7 +33,26 @@ async def next_expiry(client: IndstocksClient) -> str:
 
 
 async def run():
+    if CONFIG.mode != "PAPER" or CONFIG.live_enabled():
+        raise RuntimeError("This research campaign is PAPER-only; refusing to start outside PAPER mode.")
+
+    # A fresh campaign never imports legacy journals or positions. However, a
+    # legacy persisted open PAPER position must be reviewed before isolation.
+    legacy_position = LEGACY_DATA_ROOT / "open_position.json"
+    if DATA_ROOT.resolve() != LEGACY_DATA_ROOT.resolve() and legacy_position.exists():
+        raise RuntimeError(
+            f"Legacy open-position state exists at {legacy_position}; review it before starting a fresh campaign."
+        )
+
     Terminal.set_safety_hold(False)
+    record_audit_event("paper_campaign_started", {
+        "campaign_id": CAMPAIGN_ID,
+        "data_root": str(DATA_ROOT),
+        "mode": CONFIG.mode,
+        "live_order_routing_enabled": CONFIG.live_enabled(),
+        "legacy_data_preserved": True,
+        "legacy_journal_imported": False,
+    })
     # Resolve any order intent left unfinished by a prior process before the
     # application can consider new entries. Never infer broker flatness.
     unresolved_orders = enforce_startup_reconciliation()
@@ -124,7 +144,7 @@ async def run():
             Terminal.set_safety_hold(True, hold_reason)
             record_audit_event("position_recovery_failed", {
                 "reason": str(exc),
-                "state_file": ".quantnifty/open_position.json",
+                "state_file": str(DATA_ROOT / "open_position.json"),
                 "manual_review_required": True,
             })
         if execution.position is not None:
