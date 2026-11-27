@@ -27,8 +27,8 @@ DEFAULT_MAX_BATCHES_PER_RUN = 5
 API_ROOT = "https://api.github.com"
 SECRET_KEY_PARTS = ("token", "secret", "password", "authorization", "api_key", "apikey", "cookie")
 SECRET_PATTERNS = (
-    (re.compile(r"(?i)\\bBearer\\s+[A-Za-z0-9._~+/=-]+"), "Bearer [REDACTED]"),
-    (re.compile(r"(?i)([?&](?:access_token|refresh_token|api_key|apikey|token|client_secret|password)=)[^&\\s]+"), r"\\1[REDACTED]"),
+    (re.compile(r"(?i)\bBearer\s+[A-Za-z0-9._~+/=-]+"), "Bearer [REDACTED]"),
+    (re.compile(r"(?i)([?&](?:access_token|refresh_token|api_key|apikey|token|client_secret|password)=)[^&\s]+"), r"\1[REDACTED]"),
 )
 
 
@@ -45,7 +45,7 @@ def _redact_text(raw: bytes) -> bytes:
     if isinstance(document, dict):
         document.pop("raw_audit_events", None)
         document.pop("raw_option_chain_snapshots", None)
-        return (json.dumps(_redact_value(document), ensure_ascii=False, indent=2) + "\\n").encode("utf-8")
+        return (json.dumps(_redact_value(document), ensure_ascii=False, indent=2) + "\n").encode("utf-8")
     lines = []
     for line in text.splitlines():
         try:
@@ -57,7 +57,7 @@ def _redact_text(raw: bytes) -> bytes:
             lines.append(safe)
             continue
         lines.append(json.dumps(_redact_value(row), ensure_ascii=False, separators=(",", ":")))
-    return (("\\n".join(lines) + "\\n") if lines else "").encode("utf-8")
+    return (("\n".join(lines) + "\n") if lines else "").encode("utf-8")
 
 
 def _redact_value(value):
@@ -110,7 +110,7 @@ def discover_pending_dates() -> list[str]:
     reports = DATA_ROOT / "reports"
     if reports.exists():
         for path in reports.iterdir():
-            if path.is_dir() and re.fullmatch(r"\\d{4}-\\d{2}-\\d{2}", path.name):
+            if path.is_dir() and re.fullmatch(r"\d{4}-\d{2}-\d{2}", path.name):
                 if any(p.is_file() and p.stat().st_size for p in path.iterdir()):
                     days.add(path.name)
     return sorted(days)
@@ -171,7 +171,7 @@ def build_batch_archive(
             safe = _redact_text(raw)
             if not safe:
                 continue
-            archive_name = str(path.relative_to(DATA_ROOT)).replace("\\\\", "/")
+            archive_name = str(path.relative_to(DATA_ROOT)).replace("\\", "/")
             archive.writestr(archive_name, safe)
             manifest["files"].append({
                 "path": archive_name,
