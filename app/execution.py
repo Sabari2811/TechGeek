@@ -8,6 +8,7 @@ from .market import IndstocksClient
 from .kill_switch import status as kill_switch_status, set_enabled as set_kill_switch
 from .raw_data import record_audit_event
 from .order_journal import record_order_event
+from .paper_journal import record_paper_trade_event
 from .session_state import save_open_position, clear_open_position
 
 
@@ -195,6 +196,19 @@ class ExecutionEngine:
                     "Open PAPER position could not be durably persisted; entry kill switch enabled"
                 ) from exc
         if CONFIG.mode == "PAPER" and not CONFIG.live_enabled():
+            trade_id = f"{signal.security_id}:{self.position.opened_at.isoformat()}"
+            record_paper_trade_event(trade_id, "paper_entry_filled", {
+                "side": "BUY", "symbol": signal.symbol, "security_id": signal.security_id,
+                "option_type": signal.option_type, "strike": signal.strike,
+                "quantity": qty, "fill_price": entry, "price_basis": "ASK",
+                "stop_price": signal.stop, "target_price": signal.target,
+                "probability": signal.probability, "fair_value": signal.fair_value,
+                "expected_value": signal.expected_value, "net_expected_value": signal.net_expected_value,
+                "score": signal.score, "score_components": signal.score_components,
+                "checks": signal.checks, "signal_reason": signal.reason,
+                "market_phase": signal.market_phase, "direction_bias": signal.direction_bias,
+                "position_opened_at": self.position.opened_at.isoformat(),
+            })
             record_audit_event("paper_order_simulated", {
                 "side": "BUY",
                 "simulated": True,
@@ -267,6 +281,16 @@ class ExecutionEngine:
         p.quantity -= traded_qty
         p.exit_reason = reason
         if CONFIG.mode == "PAPER" and not CONFIG.live_enabled():
+            trade_id = f"{p.signal.security_id}:{p.opened_at.isoformat()}"
+            record_paper_trade_event(trade_id, "paper_exit_filled", {
+                "side": "SELL", "symbol": p.signal.symbol, "security_id": p.signal.security_id,
+                "option_type": p.signal.option_type, "strike": p.signal.strike,
+                "quantity": traded_qty, "fill_price": fill_price, "price_basis": price_basis,
+                "exit_reason": reason, "entry_price": p.entry_price,
+                "gross_pnl_for_fill": (fill_price - p.entry_price) * traded_qty,
+                "remaining_quantity": p.quantity, "stop_price": p.signal.stop,
+                "target_price": p.signal.target, "position_opened_at": p.opened_at.isoformat(),
+            })
             record_audit_event("paper_order_simulated", {
                 "side": "SELL",
                 "simulated": True,
