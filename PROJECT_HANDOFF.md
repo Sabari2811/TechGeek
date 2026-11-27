@@ -359,3 +359,12 @@ No live order routing was enabled or used during these changes.
 - Added explicit `paper_order_simulated` audit events for simulated BUY-at-ASK and SELL-at-fresh-BID (or labelled LTP estimate) fills, including contract, quantity, price, notional, stop/target, EV/probability, score, strategy reason, checks, exit reason and charges-status disclosure. These events flow through the existing private research archive uploader.
 - PAPER simulation continues to use the existing kill switch, startup unresolved-order hold, position persistence, daily risk limits, one-lot cap, stale quote checks and five-level microstructure gate. No unresolved journal item is auto-reconciled and no real-money order routing is enabled.
 - Pending validation: GitHub Actions matrix and user's Windows-local run. The current ten unresolved journal items remain a hard entry block until independently reconciled.
+
+
+## 2026-11-27 — Research uploader oversized report fix
+
+- Root cause: daily_report.json duplicated the complete raw audit events and raw option-chain snapshots already stored in dedicated JSONL files. Today's report reached 587,856,505 bytes, exceeding the uploader's 2 MiB safe non-JSONL limit and aborting the date batch.
+- The uploader now treats raw option-chain JSONL and audit JSONL as canonical raw evidence and excludes the duplicate daily_report.json from GitHub batches. The compact analysis.md remains uploadable.
+- Future daily reports omit duplicated raw arrays but retain summaries, selected candidate/rejection/microstructure evidence, fill reconciliation and raw-data manifest. Raw JSONL is still retained locally and synced incrementally.
+- Regression coverage confirms report directories remain discoverable, analysis.md is included, and daily_report.json is excluded.
+- No changes to strategy, entry gates, kill switch, order journal, or broker routing. Existing unresolved startup journal hold remains in force.
