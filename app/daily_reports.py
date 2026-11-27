@@ -8,11 +8,11 @@ from collections import Counter
 from datetime import date
 from pathlib import Path
 
-from .raw_data import RAW_ROOT, AUDIT_ROOT, load_option_chain_records
+from .raw_data import RAW_ROOT, AUDIT_ROOT, load_option_chain_records\nfrom .storage import DATA_ROOT
 from .session_state import load_today_trades
 from backtest.execution_replay import load_audit_events, reconcile_recorded_fills
 
-REPORT_ROOT = Path(".quantnifty/reports")
+REPORT_ROOT = DATA_ROOT / "reports"
 
 
 def _redact(value):
