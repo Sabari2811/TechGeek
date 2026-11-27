@@ -273,6 +273,14 @@ async def fetch_read_only_broker_reconciliation(client, root: Path | None = None
     trade_fills = {}
     trade_fetch_errors = {}
     for order_id in sorted(order_ids):
+        # INDstocks documents derivative IDs as DRV-* or GTT-*.
+        # Numeric/local IDs are not sent to the broker; they stay unresolved.
+        if not order_id.startswith(("DRV-", "GTT-")) or order_id in {"DRV-", "GTT-"}:
+            trade_fetch_errors[order_id] = {
+                "error_type": "InvalidBrokerOrderId",
+                "message": "Journal order_id is not in a documented DERIVATIVE format (DRV-* or GTT-*); broker request skipped.",
+            }
+            continue
         try:
             trade_fills[order_id] = await client.order_trades(order_id, "DERIVATIVE")
         except Exception as exc:
