@@ -194,7 +194,7 @@ async def run():
                         and time.monotonic() - last_research_sync >= research_sync_interval):
                     last_research_sync = time.monotonic()
                     try:
-                        result = await asyncio.to_thread(upload_batch, today.isoformat())
+                        result = await asyncio.to_thread(upload_pending_batches)
                         print(f'PRIVATE RESEARCH UPLOAD: {result}')
                         last_research_sync = time.monotonic()
                     except Exception as sync_exc:
