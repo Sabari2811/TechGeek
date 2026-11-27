@@ -257,12 +257,26 @@ class IndstocksClient:
         normalized_segment = str(segment).strip().upper()
         if normalized_segment not in {"EQUITY", "DERIVATIVE", "COMMODITY"}:
             raise ValueError("segment must be EQUITY, DERIVATIVE, or COMMODITY")
+        # Reject local counters, exchange IDs, and malformed journal values
+        # before making a broker request. Prefixes follow INDstocks docs.
+        order_id_value = str(order_id).strip()
+        allowed_prefixes = {
+            "EQUITY": ("EQ-", "GTT-"),
+            "DERIVATIVE": ("DRV-", "GTT-"),
+            "COMMODITY": ("COM-", "GTT-"),
+        }[normalized_segment]
+        if not any(order_id_value.startswith(prefix) and len(order_id_value) > len(prefix)
+                   for prefix in allowed_prefixes):
+            raise ValueError(
+                f"Invalid INDstocks {normalized_segment} order_id format; "
+                f"expected prefix {', '.join(allowed_prefixes)}"
+            )
         # httpx.AsyncClient.get() does not accept a JSON body; request() does.
         # Keep the provider's documented GET method and JSON payload unchanged.
         r = await self.http.request(
             "GET",
             "/order/trades",
-            json={"order_id": str(order_id), "segment": normalized_segment},
+            json={"order_id": order_id_value, "segment": normalized_segment},
         )
         r.raise_for_status()
         payload = r.json()
