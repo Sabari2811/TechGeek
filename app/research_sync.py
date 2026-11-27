@@ -13,7 +13,7 @@ from pathlib import Path
 
 import httpx
 
-from .config import CONFIG, IST
+from .config import CONFIG, IST\nfrom .storage import DATA_ROOT, CAMPAIGN_ID
 
 STATE_PATH = Path(".quantnifty/github_sync_state.json")
 DATA_ROOT = Path(".quantnifty")
@@ -262,7 +262,7 @@ def _upload_one(day: str, token: str, repository: str) -> dict:
     if not payload:
         return {"status": "nothing_new", "trading_date": day, "source_bytes": 0}
     stamp = datetime.now(IST).strftime("%H%M%S")
-    path = f"batches/{day}/paper-research-{stamp}-{time.time_ns()}.zip"
+    path = f"campaigns/{CAMPAIGN_ID}/batches/{day}/paper-research-{stamp}-{time.time_ns()}.zip"
     with httpx.Client(headers=_github_headers(token), timeout=60.0) as client:
         _verify_private_repo(client, repository)
         response = client.put(
