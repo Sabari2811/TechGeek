@@ -6,7 +6,8 @@ import os
 import tempfile
 from dataclasses import dataclass, field
 from datetime import date, datetime
-from .config import IST\nfrom .storage import DATA_ROOT
+from .config import IST
+from .storage import DATA_ROOT
 from pathlib import Path
 from typing import Dict, List
 
