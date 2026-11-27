@@ -58,3 +58,11 @@ local receive time is available.
   than allowing unlimited Git history growth.
 - The collector runs on your Windows machine; GitHub stores the uploaded research
   batches. This is not a cloud-hosted market feed service.
+
+
+## Backfill and stopping the PAPER app
+
+- The uploader automatically scans all locally present ISO-date folders/files and processes the oldest date with pending bytes first. It does not require the market to be open to upload existing local data.
+- A single sync invocation uploads at most five chunks. Each JSONL chunk ends on a complete record boundary; very large individual records are still subject to the 20 MiB compressed archive cap.
+- Stopping the local application stops collection and scheduled uploads, but does not delete local data or saved upload cursors. Start it again in PAPER mode to resume pending uploads. Use Ctrl+C once and allow normal shutdown; do not force-kill while files are being written.
+- The sync is best-effort and does not affect strategy decisions, order execution, risk controls, the kill switch or broker reconciliation.
